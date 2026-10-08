@@ -187,13 +187,13 @@ function revealToken(cipher) {
 }
 
 function normalizeRemote(p) {
-  let x = String(p || '/').trim().replaceAll('\\\\','/');
-  if(x.includes('\\0')) throw new Error('Remote path cannot contain NUL bytes.');
+  let x = String(p || '/').trim().replaceAll('\\','/');
+  if(x.includes('\0')) throw new Error('Remote path cannot contain NUL bytes.');
   if (!x.startsWith('/')) x = '/' + x;
-  x = x.replace(/\\/+/g,'/');
+  x = x.replace(/\/+/g,'/');
   x = path.posix.normalize(x);
   if (!x.startsWith('/')) x = '/' + x;
-  if (x.length > 1) x = x.replace(/\\/+$/,'');
+  if (x.length > 1) x = x.replace(/\/+$/,'');
   return x;
 }
 function safeName(s) { return String(s || '').trim(); }
