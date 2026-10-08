@@ -1,0 +1,16 @@
+node_modules/
+.env
+.env.*
+*.log
+logs/
+*.zip
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local plugin state / test artifacts
+.hosting/
+sync-backup/
+sync-reports/
+.cpanel-sync-backup/
