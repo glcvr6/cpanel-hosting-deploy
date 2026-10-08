@@ -474,7 +474,8 @@ async function setAccepted(c,rel,value){const st=await loadProtectionState();st.
 async function getSettings(c){return normalizeSettings(c.settings);}
 async function updateSettings(c,patch){c.settings=normalizeSettings({...normalizeSettings(c.settings),...patch,protection:{...normalizeSettings(c.settings).protection,...(patch.protection||{})}});const store=await loadStore();const idx=store.connections.findIndex(x=>x.name.toLowerCase()===c.name.toLowerCase());if(idx<0)throw new Error(`Connection not found: ${c.name}`);store.connections[idx].settings=c.settings;await saveStore(store);return c.settings;}
 function protectionWarning(c){const st=normalizeSettings(c.settings);if(st.protectionMode==='OFF')return 'Protection is OFF: only the original v1.10.3 core workflow is active.';return st.protectionMode==='SECURED'?'Protection SECURED: all protection rules are active.':'Protection CUSTOM: only selected protection rules are active.';}
-async function buildRemoteStatus(c){
+async function buildRemoteStatus(c, options={}){
+  const advanceBaseline=options.advanceBaseline!==false;
   const manifest=await loadManifest();
   const previous=await loadRemoteMeta();
   const hadBaseline=Object.keys(previous).length>0;
@@ -516,7 +517,7 @@ async function buildRemoteStatus(c){
     if(!remoteFiles.has(rp)) remoteDeleted.push({path:rel,remote:rp});
   }
 
-  await saveRemoteMeta(current);
+  if(advanceBaseline) await saveRemoteMeta(current);
   const pending={createdAt:new Date().toISOString(),connection:c.name,remoteNew,remoteUntracked,remoteChanged,remoteDeleted,conflicts};
   await saveRemotePending(pending);
   return {
@@ -532,7 +533,8 @@ async function buildRemoteStatus(c){
   };
 }
 
-async function buildRemoteStatusProtected(c){
+async function buildRemoteStatusProtected(c, options={}){
+  const advanceBaseline=options.advanceBaseline!==false;
   const manifest=await loadManifest();
   const previous=await loadRemoteMeta();
   const hadBaseline=Object.keys(previous).length>0;
@@ -577,7 +579,7 @@ async function buildRemoteStatusProtected(c){
   // A read-only status check never advances the remote baseline when differences exist.
   // If every tracked pair is confirmed identical, the current state is safe to accept.
   const hasDifferences = remoteNew.length||remoteChanged.length||remoteDeleted.length||conflicts.length;
-  if (!hasDifferences || (!remoteChanged.length && !remoteDeleted.length && !conflicts.length)) await saveRemoteMeta(current);
+  if(advanceBaseline && (!hasDifferences || (!remoteChanged.length && !remoteDeleted.length && !conflicts.length))) await saveRemoteMeta(current);
   const pending={createdAt:new Date().toISOString(),connection:c.name,remoteNew,remoteUntracked,remoteChanged,remoteDeleted,conflicts};
   await saveRemotePending(pending);
   return {
@@ -594,10 +596,15 @@ async function buildRemoteStatusProtected(c){
 }
 
 async function remoteSync(c, actions, confirm){
-  // Always refresh remote state immediately before a sync decision.
-  // Never rely on a stale pending snapshot because the remote may have
-  // changed after the last /cpanel-remote-status call.
-  const pending=await buildRemoteStatus(c);
+  // Refresh the remote observation immediately before a sync decision, but
+  // NEVER advance the comparison baseline during this refresh. The baseline
+  // must remain the state against which the user was shown the change.
+  // Otherwise remote-status can report a change and remote-sync can erase it
+  // from its own comparison before applying the requested action.
+  const st=normalizeSettings(c.settings);
+  const pending=st.protectionMode==='OFF'
+    ? await buildRemoteStatus(c,{advanceBaseline:false})
+    : await buildRemoteStatusProtected(c,{advanceBaseline:false});
   const candidates=[...pending.remoteNew.map(x=>({...x,status:'REMOTE NEW'})),...pending.remoteChanged.map(x=>({...x,status:'REMOTE CHANGED'})),...pending.remoteDeleted.map(x=>({...x,status:'REMOTE DELETED'}))];
   const allowed=new Map(Array.isArray(actions)?actions.map(x=>[String(x.path),x]):[]);
   if(!confirm) return {requiresConfirmation:true,connection:c.name,summary:{remoteNew:pending.remoteNew.length,remoteUntracked:pending.remoteUntracked.length,remoteChanged:pending.remoteChanged.length,remoteDeleted:pending.remoteDeleted.length,conflicts:pending.conflicts.length},files:candidates,remoteUntracked:pending.remoteUntracked,conflicts:pending.conflicts,message:candidates.length?'No local files were changed. Review each remote change and call remote sync again with explicit per-file actions (sync or keep) and confirm=true.':'No remote changes need syncing.'};
