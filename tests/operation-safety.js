@@ -29,5 +29,5 @@ assert(s.includes("api2FileOp(c,'trash',item.path)"),'remote backup retention mu
 assert(s.includes("withOperationLock(c,'deploy'"),'deploy lock missing');
 assert(s.includes("withOperationLock(c,'remote-sync'"),'remote sync lock missing');
 assert(s.includes("withOperationLock(c,'workspace-setup'"),'workspace setup lock missing');
-assert(s.includes("const VERSION = '1.11.6';"),'server version must match the current release');
+assert(s.includes("const VERSION = '1.11.7';"),'server version must match the current release');
 console.log('Operation safety regression: PASS');
