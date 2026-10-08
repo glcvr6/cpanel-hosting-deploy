@@ -1,46 +1,93 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="500" viewBox="0 0 1600 500">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="800" viewBox="0 0 1600 800">
 <defs>
- <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#07101d"/><stop offset=".65" stop-color="#0d1724"/><stop offset="1" stop-color="#171008"/></linearGradient>
- <linearGradient id="blue" x1="0" x2="1"><stop stop-color="#42a5ff"/><stop offset="1" stop-color="#00c2ff"/></linearGradient>
- <linearGradient id="orange" x1="0" x2="1"><stop stop-color="#ffb000"/><stop offset="1" stop-color="#ff5b00"/></linearGradient>
- <filter id="glow"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+ <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#030b15"/><stop offset=".58" stop-color="#071625"/><stop offset="1" stop-color="#160d06"/></linearGradient>
+ <linearGradient id="blue" x1="0" x2="1"><stop stop-color="#168cff"/><stop offset="1" stop-color="#00c8ff"/></linearGradient>
+ <linearGradient id="orange" x1="0" x2="1"><stop stop-color="#ffb000"/><stop offset="1" stop-color="#ff5a00"/></linearGradient>
+ <filter id="gb"><feGaussianBlur stdDeviation="10" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+ <filter id="go"><feGaussianBlur stdDeviation="9" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+ <filter id="shadow"><feGaussianBlur in="SourceAlpha" stdDeviation="12"/><feOffset dy="8"/><feComponentTransfer><feFuncA type="linear" slope=".5"/></feComponentTransfer><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
 </defs>
-<rect width="1600" height="500" rx="28" fill="url(#bg)"/>
-<!-- visual identity -->
-<g transform="translate(55 55)">
- <rect width="390" height="390" rx="48" fill="#111a28" stroke="#35a7ff" stroke-width="5" filter="url(#glow)"/>
- <path d="M195 65 300 175 195 285 90 175Z" fill="#edf5ff" stroke="#9eb2c5" stroke-width="4"/>
- <path d="M195 65v220L90 175Z" fill="#93a4b5" opacity=".3"/>
- <text x="195" y="350" text-anchor="middle" font-family="Arial,sans-serif" font-size="43" font-weight="700" letter-spacing="5" fill="#fff">CURSOR</text>
+<rect width="1600" height="800" rx="38" fill="url(#bg)"/>
+<rect x="28" y="28" width="1544" height="744" rx="30" fill="none" stroke="#1c3045" stroke-width="2"/>
+
+<!-- LEFT: Cursor -->
+<g transform="translate(65 110)" filter="url(#shadow)">
+ <rect width="455" height="455" rx="58" fill="#071522" stroke="#159cff" stroke-width="6"/>
+ <rect x="18" y="18" width="419" height="419" rx="45" fill="none" stroke="#0d3b5e" stroke-width="2"/>
+ <path d="M228 82 L354 207 L228 333 L102 207 Z" fill="#f4f8fc" stroke="#aabed0" stroke-width="5"/>
+ <path d="M228 82 L228 333 L102 207 Z" fill="#8fa2b5" opacity=".35"/>
+ <path d="M228 82 L354 207 L228 333" fill="none" stroke="#ffffff" stroke-width="3" opacity=".7"/>
+ <text x="228" y="394" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="52" font-weight="700" letter-spacing="7" fill="#f5f7fa">CURSOR</text>
 </g>
-<g transform="translate(820 70)">
- <rect width="330" height="330" rx="44" fill="#fff" stroke="#ff7600" stroke-width="5" filter="url(#glow)"/>
- <path d="M75 100q0-45 45-45h100q45 0 45 45v45H75zM75 145h190v70q0 50-50 50H125q-50 0-50-50z" fill="#ff7600"/>
- <text x="170" y="195" text-anchor="middle" font-family="Arial,sans-serif" font-size="78" font-weight="900" font-style="italic" fill="#fff">cP</text>
- <text x="170" y="238" text-anchor="middle" font-family="Arial,sans-serif" font-size="34" font-weight="800" fill="#17202b">cPanel</text>
+
+<!-- SERVER -->
+<g transform="translate(505 72)" filter="url(#shadow)">
+ <rect width="185" height="135" rx="20" fill="#152638" stroke="#8ca5bc" stroke-width="4"/>
+ <rect x="22" y="22" width="141" height="24" rx="8" fill="#263c52"/>
+ <circle cx="135" cy="34" r="6" fill="#22c55e"/><circle cx="151" cy="34" r="6" fill="#20a9ff"/>
+ <rect x="22" y="56" width="141" height="24" rx="8" fill="#263c52"/>
+ <circle cx="135" cy="68" r="6" fill="#ff7a00"/><circle cx="151" cy="68" r="6" fill="#20a9ff"/>
+ <rect x="22" y="90" width="141" height="20" rx="8" fill="#263c52"/>
 </g>
-<!-- connection -->
-<path d="M455 165 C565 85 690 85 820 155" fill="none" stroke="url(#blue)" stroke-width="18" stroke-linecap="round" filter="url(#glow)"/>
-<path d="m790 137 42 18-39 24z" fill="#00baff"/>
-<path d="M820 335 C690 415 570 415 445 340" fill="none" stroke="url(#orange)" stroke-width="18" stroke-linecap="round" filter="url(#glow)"/>
-<path d="m475 358-42-18 39-24z" fill="#ff7900"/>
-<g transform="translate(610 190)">
- <rect width="115" height="95" rx="12" fill="#edf7ff" stroke="#63a9dc" stroke-width="4"/>
- <path d="M25 30h65M25 52h65M25 74h45" stroke="#4a91c5" stroke-width="8" stroke-linecap="round"/>
+
+<!-- CONNECTION / FILE FLOW -->
+<path d="M500 250 C590 155 705 155 805 255" fill="none" stroke="url(#blue)" stroke-width="24" stroke-linecap="round" filter="url(#gb)"/>
+<path d="M803 255 l-42 -27 11 49z" fill="#10bfff"/>
+<path d="M805 385 C705 485 590 485 500 390" fill="none" stroke="url(#orange)" stroke-width="24" stroke-linecap="round" filter="url(#go)"/>
+<path d="M502 390 l42 -27 -11 49z" fill="#ff7b00"/>
+
+<g transform="translate(585 292)">
+ <path d="M0 24 Q0 0 24 0 H78 L96 20 H116 Q130 20 130 34 V103 Q130 117 116 117 H14 Q0 117 0 103Z" fill="#168cff" stroke="#73c7ff" stroke-width="4"/>
+ <path d="M27 51h70M27 73h70M27 95h47" stroke="#e9f7ff" stroke-width="8" stroke-linecap="round"/>
 </g>
-<g transform="translate(615 20)">
- <rect width="105" height="65" rx="12" fill="#172536" stroke="#829bb4" stroke-width="3"/>
- <circle cx="78" cy="22" r="6" fill="#22c55e"/><circle cx="92" cy="22" r="6" fill="#20a9ff"/>
- <rect x="15" y="38" width="75" height="9" rx="4" fill="#2a3c52"/>
+
+<!-- RIGHT: cPanel -->
+<g transform="translate(735 118)" filter="url(#shadow)">
+ <rect width="455" height="455" rx="58" fill="#fff" stroke="#ff7300" stroke-width="6"/>
+ <rect x="18" y="18" width="419" height="419" rx="45" fill="none" stroke="#ffd2b0" stroke-width="2"/>
+ <path d="M92 126 Q92 67 151 67 H303 Q362 67 362 126 V179 H92Z" fill="#ff7900"/>
+ <path d="M92 179 H362 V286 Q362 350 298 350 H156 Q92 350 92 286Z" fill="#ff7900"/>
+ <text x="227" y="238" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="110" font-weight="900" font-style="italic" fill="#fff">cP</text>
+ <text x="227" y="323" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="54" font-weight="800" fill="#18232e">cPanel</text>
 </g>
-<!-- title -->
-<text x="1210" y="125" text-anchor="middle" font-family="Arial,sans-serif" font-size="58" font-weight="900" fill="#ff7900">cPanel</text>
-<text x="1210" y="192" text-anchor="middle" font-family="Arial,sans-serif" font-size="58" font-weight="800" fill="#f5f7fa">Hosting Deploy</text>
-<rect x="950" y="225" width="520" height="7" rx="3" fill="url(#blue)"/><rect x="1210" y="225" width="260" height="7" rx="3" fill="url(#orange)"/>
-<text x="1210" y="280" text-anchor="middle" font-family="Arial,sans-serif" font-size="25" fill="#b6c3d0">Safe cPanel deployment and remote synchronization for Cursor</text>
-<g font-family="Arial,sans-serif" font-size="21" font-weight="700">
- <text x="950" y="345" fill="#54adff">↥ Deploy</text><text x="1085" y="345" fill="#ff8b18">↧ Sync</text>
- <text x="1190" y="345" fill="#4ade80">✓ Protection</text><text x="1370" y="345" fill="#c084fc">↻ Recovery</text>
+
+<!-- TITLE -->
+<text x="1300" y="165" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="76" font-weight="900" fill="#ff7900">cPanel</text>
+<text x="1300" y="250" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="76" font-weight="800" fill="#f5f7fa">Hosting Deploy</text>
+<rect x="1010" y="282" width="580" height="8" rx="4" fill="url(#blue)"/>
+<rect x="1300" y="282" width="290" height="8" rx="4" fill="url(#orange)"/>
+<text x="1300" y="355" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="31" fill="#d8e1ea">Safe cPanel deployment and</text>
+<text x="1300" y="397" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="31" fill="#d8e1ea">remote synchronization for Cursor</text>
+
+<!-- FEATURE STRIP -->
+<g transform="translate(55 625)" font-family="Arial,Helvetica,sans-serif">
+ <rect width="1490" height="105" rx="28" fill="#07111d" stroke="#1b334a" stroke-width="2"/>
+ <g transform="translate(40 22)">
+  <rect width="62" height="62" rx="16" fill="#071b2d" stroke="#1d9bff" stroke-width="4"/>
+  <path d="M31 48V17M18 30l13-13 13 13" stroke="#28a8ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="82" y="28" font-size="23" font-weight="800" fill="#f4f7fb">Deploy</text><text x="82" y="53" font-size="18" fill="#8fa6bb">Local → cPanel</text>
+ </g>
+ <line x1="385" y1="22" x2="385" y2="83" stroke="#294258" stroke-width="2"/>
+ <g transform="translate(425 22)">
+  <rect width="62" height="62" rx="16" fill="#2a1808" stroke="#ff7900" stroke-width="4"/>
+  <path d="M31 16v31M18 35l13 13 13-13" stroke="#ff8b17" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="82" y="28" font-size="23" font-weight="800" fill="#f4f7fb">Sync</text><text x="82" y="53" font-size="18" fill="#8fa6bb">cPanel → Local</text>
+ </g>
+ <line x1="750" y1="22" x2="750" y2="83" stroke="#294258" stroke-width="2"/>
+ <g transform="translate(790 22)">
+  <rect width="62" height="62" rx="16" fill="#092117" stroke="#22d66b" stroke-width="4"/>
+  <path d="M31 15l20 8v14c0 14-9 25-20 30-11-5-20-16-20-30V23z" fill="none" stroke="#35e77d" stroke-width="4"/>
+  <path d="M23 37l6 6 12-13" fill="none" stroke="#35e77d" stroke-width="4" stroke-linecap="round"/>
+  <text x="82" y="28" font-size="23" font-weight="800" fill="#f4f7fb">Protection Modes</text><text x="82" y="53" font-size="18" fill="#8fa6bb">SECURED · CUSTOM · OFF</text>
+ </g>
+ <line x1="1135" y1="22" x2="1135" y2="83" stroke="#294258" stroke-width="2"/>
+ <g transform="translate(1175 22)">
+  <rect width="62" height="62" rx="16" fill="#1d1229" stroke="#b46cff" stroke-width="4"/>
+  <path d="M47 28a20 20 0 1 0 0 18" fill="none" stroke="#c084fc" stroke-width="5" stroke-linecap="round"/>
+  <path d="M48 17v14H34" fill="none" stroke="#c084fc" stroke-width="5" stroke-linecap="round"/>
+  <text x="82" y="28" font-size="23" font-weight="800" fill="#f4f7fb">Backups &amp; Recovery</text><text x="82" y="53" font-size="18" fill="#8fa6bb">Safe and auditable</text>
+ </g>
 </g>
-<text x="1210" y="405" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" fill="#8295aa" letter-spacing="2">LOCAL ↔ CPANEL • SAFE SYNC • v1.11.0</text>
+
+<text x="1310" y="762" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="19" letter-spacing="4" fill="#71869a">LOCAL → CPANEL → SAFE SYNC → v1.11.0</text>
 </svg>
