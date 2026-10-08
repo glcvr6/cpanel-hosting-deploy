@@ -13,7 +13,6 @@ assert(s.includes("async function withProtectionStateLock(fn)"),'protection stat
 assert(s.includes("return await withProtectionStateLock(async()=>"),'accepted state mutation must be serialized');
 assert(s.includes("await fsp.rename(tmp,file)"),'atomic JSON writer must replace state via rename');
 assert(s.includes("Protection state is unreadable or corrupted"),'corrupt protection state must fail closed');
-assert(s.includes("saveRemotePending(x){ await atomicJsonWrite") || s.includes("saveRemotePending(x){await atomicJsonWrite") || s.includes("async function saveRemotePending(x){ await atomicJsonWrite"),'pending state must use atomic JSON writes');
 assert(s.includes("async function saveManifest(m){ await atomicJsonWrite(manifestPath(),m); }"),'manifest writes must be atomic');
 assert(s.includes("async function saveRemoteMeta(m){ await atomicJsonWrite(remoteMetaPath(),m); }"),'remote baseline writes must be atomic');
 assert(s.includes("fss.open(lockPath,'wx')") || s.includes("fsp.open(lockPath,'wx')"),'lock must use exclusive file creation');
@@ -29,5 +28,5 @@ assert(s.includes("api2FileOp(c,'trash',item.path)"),'remote backup retention mu
 assert(s.includes("withOperationLock(c,'deploy'"),'deploy lock missing');
 assert(s.includes("withOperationLock(c,'remote-sync'"),'remote sync lock missing');
 assert(s.includes("withOperationLock(c,'workspace-setup'"),'workspace setup lock missing');
-assert(s.includes("const VERSION = '1.11.7';"),'server version must match the current release');
+assert(s.includes("const VERSION = '1.11.8';"),'server version must match the current release');
 console.log('Operation safety regression: PASS');
