@@ -290,6 +290,7 @@ function excluded(rel, list){
     if(parts.includes(pattern)) return true;
   }
 
+  if(isIgnoredProtectionPath(normalizedRel)) return true;
   return path.extname(normalizedRel).toLowerCase()==='.zip';
 }
 function mappingForLocal(c,rel){
@@ -451,7 +452,15 @@ async function saveProtectionState(x){const d=path.dirname(protectionStatePath()
 function backupRoot(){return path.join(WORKSPACE,'sync-backup');}
 function remoteBackupRoot(){return '.cpanel-sync-backup';}
 function reportRoot(){return path.join(WORKSPACE,'sync-reports');}
-function isIgnoredProtectionPath(rel){const p=String(rel).replaceAll('\\','/');return p.includes('.remote-deleted.backup')||p.startsWith('sync-backup/')||p.includes('/sync-backup/')||p.startsWith('sync-reports/')||p.includes('/sync-reports/');}
+function isIgnoredProtectionPath(rel){
+  const p=String(rel).replaceAll('\\','/');
+  return p.includes('.remote-deleted.backup') ||
+    p.includes('.remote-overwritten.backup') ||
+    p.includes('.local-deleted.backup') ||
+    p.startsWith('sync-backup/') || p.includes('/sync-backup/') ||
+    p.startsWith('sync-reports/') || p.includes('/sync-reports/') ||
+    p.startsWith('.cpanel-sync-backup/') || p.includes('/.cpanel-sync-backup/');
+}
 async function copyLocalBackup(rel,suffix){
   const src=localPathForRel(rel); if(!fs.existsSync(src)) return null;
   const dst=path.join(backupRoot(),...String(rel).split('/'))+`.${suffix}.backup`;
