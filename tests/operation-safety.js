@@ -6,13 +6,18 @@ assert(s.includes("async function api2FileOp(c,op,sourcefiles)"),'remote delete 
 assert(s.includes("cpanel_jsonapi_apiversion','2'"),'API2 version missing');
 assert(s.includes("async function withOperationLock(c,operation,fn)"),'operation lock helper missing');
 assert(s.includes("async function atomicJsonWrite(file,value)"),'atomic JSON writer missing');
+assert(s.includes("async function withFileLock(lockPath,operation,fn)"),'shared file lock helper missing');
+assert(s.includes("lockId:crypto.randomUUID()"),'lock ownership token missing');
+assert(s.includes("current.lockId===owner.lockId"),'lock release must verify ownership before unlinking');
+assert(s.includes("async function withProtectionStateLock(fn)"),'protection state lock missing');
+assert(s.includes("return await withProtectionStateLock(async()=>"),'accepted state mutation must be serialized');
 assert(s.includes("await fsp.rename(tmp,file)"),'atomic JSON writer must replace state via rename');
 assert(s.includes("Protection state is unreadable or corrupted"),'corrupt protection state must fail closed');
 assert(s.includes("saveRemotePending(x){ await atomicJsonWrite") || s.includes("saveRemotePending(x){await atomicJsonWrite") || s.includes("async function saveRemotePending(x){ await atomicJsonWrite"),'pending state must use atomic JSON writes');
 assert(s.includes("async function saveManifest(m){ await atomicJsonWrite(manifestPath(),m); }"),'manifest writes must be atomic');
 assert(s.includes("async function saveRemoteMeta(m){ await atomicJsonWrite(remoteMetaPath(),m); }"),'remote baseline writes must be atomic');
 assert(s.includes("fss.open(lockPath,'wx')") || s.includes("fsp.open(lockPath,'wx')"),'lock must use exclusive file creation');
-assert(s.includes("process.kill(Number(owner.pid),0)"),'lock recovery must verify whether the recorded owner process is still alive');
+assert(s.includes("process.kill(Number(existing.pid),0)"),'lock recovery must verify whether the recorded owner process is still alive');
 assert(s.includes("pidError.code==='ESRCH'"),'lock recovery must distinguish a stale dead-process lock from an active lock');
 assert(s.includes("lock metadata is invalid"),'invalid lock metadata must fail closed');
 assert(s.includes("protectionEnabled(c,'locks')"),'lock protection gate missing');
@@ -24,5 +29,5 @@ assert(s.includes("api2FileOp(c,'trash',item.path)"),'remote backup retention mu
 assert(s.includes("withOperationLock(c,'deploy'"),'deploy lock missing');
 assert(s.includes("withOperationLock(c,'remote-sync'"),'remote sync lock missing');
 assert(s.includes("withOperationLock(c,'workspace-setup'"),'workspace setup lock missing');
-assert(s.includes("const VERSION = '1.11.4';"),'server version must match the current release');
+assert(s.includes("const VERSION = '1.11.5';"),'server version must match the current release');
 console.log('Operation safety regression: PASS');

@@ -8,7 +8,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
-const VERSION = '1.11.4';
+const VERSION = '1.11.5';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];
@@ -531,30 +531,25 @@ async function requireKeyword(action,provided,enabled=true){if(!enabled)return; 
 async function verifyRemoteContent(c,rp,localFile){const rh=await remoteSha256(c,rp);if(rh===null)return {ok:false,missing:true};const lh=sha256(localFile);return {ok:rh===lh,localHash:lh,remoteHash:rh};}
 async function retryOperation(fn,attempts){let last;for(let i=0;i<attempts;i++){try{return await fn(i+1);}catch(e){last=e;if(i===attempts-1)throw e;}}throw last;}
 function transferAttempts(c){return protectionEnabled(c,'retry') ? normalizeSettings(c.settings).retryAttempts : 1;}
-async function withOperationLock(c,operation,fn){
-  if(!protectionEnabled(c,'locks')) return await fn();
-  const dir=path.join(WORKSPACE,'.hosting');
-  const lockPath=path.join(dir,'operation.lock');
-  await fsp.mkdir(dir,{recursive:true});
+async function withFileLock(lockPath,operation,fn){
+  await fsp.mkdir(path.dirname(lockPath),{recursive:true});
+  const owner={operation,pid:process.pid,createdAt:new Date().toISOString(),lockId:crypto.randomUUID()};
 
   async function acquire(){
     try{return await fsp.open(lockPath,'wx');}
     catch(e){
       if(e.code!=='EEXIST') throw e;
-
       let raw='';
-      try{raw=(await fsp.readFile(lockPath,'utf8')).trim();}catch(readError){
+      try{raw=(await fsp.readFile(lockPath,'utf8')).trim();}catch(_){
         throw new Error('Another cPanel Hosting Deploy operation is already running; its lock could not be inspected safely.');
       }
-
-      let owner=null;
-      try{owner=JSON.parse(raw);}catch(_){}
-      if(!owner || !Number.isInteger(Number(owner.pid)) || Number(owner.pid)<=0){
-        throw new Error('Another cPanel Hosting Deploy operation is already running; the lock metadata is invalid. Remove .hosting/operation.lock only after confirming no deployment/sync operation is active.');
+      let existing=null;
+      try{existing=JSON.parse(raw);}catch(_){}
+      if(!existing || !Number.isInteger(Number(existing.pid)) || Number(existing.pid)<=0){
+        throw new Error('Another cPanel Hosting Deploy operation is already running; the lock metadata is invalid. Remove the lock only after confirming no deployment/sync operation is active.');
       }
-
       try{
-        process.kill(Number(owner.pid),0);
+        process.kill(Number(existing.pid),0);
       }catch(pidError){
         if(pidError.code==='ESRCH'){
           try{await fsp.unlink(lockPath);}catch(unlinkError){
@@ -562,9 +557,8 @@ async function withOperationLock(c,operation,fn){
           }
           return await fsp.open(lockPath,'wx');
         }
-        throw new Error('Another cPanel Hosting Deploy operation is already running (PID '+owner.pid+').');
+        throw new Error('Another cPanel Hosting Deploy operation is already running (PID '+existing.pid+').');
       }
-
       throw new Error('Another cPanel Hosting Deploy operation is already running: '+raw);
     }
   }
@@ -572,14 +566,24 @@ async function withOperationLock(c,operation,fn){
   let handle;
   try{
     handle=await acquire();
-    await handle.writeFile(JSON.stringify({operation,pid:process.pid,createdAt:new Date().toISOString()}));
+    await handle.writeFile(JSON.stringify(owner));
     return await fn();
   }finally{
     try{if(handle)await handle.close();}catch(_){}
-    try{await fsp.unlink(lockPath);}catch(_){}
+    try{
+      const raw=await fsp.readFile(lockPath,'utf8');
+      const current=JSON.parse(raw);
+      if(current && current.lockId===owner.lockId) await fsp.unlink(lockPath);
+    }catch(_){}
   }
 }
-async function writeReport(c,title,data){if(!protectionEnabled(c,'reports'))return null;const dir=reportRoot();await fsp.mkdir(dir,{recursive:true});const stamp=new Date().toISOString().replace(/[:.]/g,'-');let p=path.join(dir,`${stamp}-${title}.md`),n=1;while(fs.existsSync(p))p=path.join(dir,`${stamp}-${title}.${n++}.md`);await fsp.writeFile(p,`# ${title}\n\nConnection: ${c.name}\nTime: ${new Date().toISOString()}\n\n\`\`\`json\n${JSON.stringify(data,null,2)}\n\`\`\`\n`,'utf8');return p;}
+async function withOperationLock(c,operation,fn){
+  if(!protectionEnabled(c,'locks')) return await fn();
+  return await withFileLock(path.join(WORKSPACE,'.hosting','operation.lock'),operation,fn);
+}
+async function withProtectionStateLock(fn){
+  return await withFileLock(path.join(WORKSPACE,'.hosting','protection-state.lock'),'protection-state',fn);
+}
 async function cleanupRetention(dir,limit){
   try{
     await fsp.mkdir(dir,{recursive:true});
@@ -601,7 +605,15 @@ async function cleanupRetention(dir,limit){
 }
 function acceptedStateKey(c,rel){return `${c.name}::${rel}`;}
 async function getAccepted(c,rel){const st=await loadProtectionState();return st.accepted?.[acceptedStateKey(c,rel)]||null;}
-async function setAccepted(c,rel,value){const st=await loadProtectionState();st.accepted=st.accepted||{};const k=acceptedStateKey(c,rel);if(value)st.accepted[k]=value;else delete st.accepted[k];await saveProtectionState(st);}
+async function setAccepted(c,rel,value){
+  return await withProtectionStateLock(async()=>{
+    const st=await loadProtectionState();
+    st.accepted=st.accepted||{};
+    const k=acceptedStateKey(c,rel);
+    if(value)st.accepted[k]=value;else delete st.accepted[k];
+    await saveProtectionState(st);
+  });
+}
 async function getSettings(c){return normalizeSettings(c.settings);}
 async function updateSettings(c,patch){c.settings=normalizeSettings({...normalizeSettings(c.settings),...patch,protection:{...normalizeSettings(c.settings).protection,...(patch.protection||{})}});const store=await loadStore();const idx=store.connections.findIndex(x=>x.name.toLowerCase()===c.name.toLowerCase());if(idx<0)throw new Error(`Connection not found: ${c.name}`);store.connections[idx].settings=c.settings;await saveStore(store);return c.settings;}
 function protectionWarning(c){const st=normalizeSettings(c.settings);if(st.protectionMode==='OFF')return 'Protection is OFF: only the original v1.10.3 core workflow is active.';return st.protectionMode==='SECURED'?'Protection SECURED: all protection rules are active.':'Protection CUSTOM: only selected protection rules are active.';}
