@@ -8,7 +8,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
-const VERSION = '1.11.5';
+const VERSION = '1.11.6';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];
@@ -182,7 +182,7 @@ function safeName(s) { return String(s || '').trim(); }
 function normalizeLocalPath(p){
   const raw=String(p||'').trim().replaceAll('\\','/');
   if(!raw || raw==='.') throw new Error('Local folder mapping cannot be empty.');
-  if(raw.includes('\\0')) throw new Error('Local folder mapping cannot contain NUL bytes.');
+  if(raw.includes('\0')) throw new Error('Local folder mapping cannot contain NUL bytes.');
   if(/^[A-Za-z]:($|\/)/.test(raw) || raw.startsWith('//')) throw new Error('Local folder mapping must be relative to the workspace.');
   let x=raw.replace(/^\.\//,'').replace(/^\/+|\/+$/g,'');
   if(!x || x==='.') throw new Error('Local folder mapping cannot be empty.');
@@ -335,8 +335,13 @@ function allowedRemote(c,p){
 }
 function manifestPath(){return path.join(WORKSPACE,'.hosting','manifest.json');}
 async function loadManifest(){
-  try { const x=JSON.parse(await fsp.readFile(manifestPath(),'utf8')); return x && typeof x==='object'?x:{}; }
-  catch(_){ return {}; }
+  try {
+    const x=JSON.parse(await fsp.readFile(manifestPath(),'utf8'));
+    return x && typeof x==='object' && !Array.isArray(x)?x:{};
+  } catch(e) {
+    if(e.code==='ENOENT') return {};
+    throw new Error('Deployment manifest is unreadable or corrupted: '+e.message);
+  }
 }
 async function saveManifest(m){ await atomicJsonWrite(manifestPath(),m); }
 
@@ -443,8 +448,13 @@ async function downloadOne(c, remotePath, rel, overwrite = true) {
 
 function remoteMetaPath(){return path.join(WORKSPACE,'.hosting','remote-meta.json');}
 async function loadRemoteMeta(){
-  try { const x=JSON.parse(await fsp.readFile(remoteMetaPath(),'utf8')); return x && typeof x==='object'?x:{}; }
-  catch(_){ return {}; }
+  try {
+    const x=JSON.parse(await fsp.readFile(remoteMetaPath(),'utf8'));
+    return x && typeof x==='object' && !Array.isArray(x)?x:{};
+  } catch(e) {
+    if(e.code==='ENOENT') return {};
+    throw new Error('Remote baseline is unreadable or corrupted: '+e.message);
+  }
 }
 async function saveRemoteMeta(m){ await atomicJsonWrite(remoteMetaPath(),m); }
 function remoteMetaEqual(a,b){
