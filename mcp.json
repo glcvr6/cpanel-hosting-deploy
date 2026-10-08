@@ -5,10 +5,7 @@
       "args": [
         "${CURSOR_PLUGIN_ROOT}/server/cpanel-mcp.js"
       ],
-      "cwd": "${CURSOR_PLUGIN_ROOT}",
-      "env": {
-        "CURSOR_WORKSPACE": "${workspaceFolder}"
-      }
+      "cwd": "${CURSOR_PLUGIN_ROOT}"
     }
   }
 }
