@@ -467,7 +467,6 @@ async function downloadOne(c, remotePath, rel, overwrite = true) {
   if (!r.ok) throw new Error(`Download failed HTTP ${r.status} for ${remotePath}`);
 
   const b = Buffer.from(await r.arrayBuffer());
-  const local = path.join(WORKSPACE, ...rel.split('/'));
   await fsp.mkdir(path.dirname(local), {recursive: true});
 
   if (!overwrite) {
