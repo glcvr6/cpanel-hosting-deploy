@@ -165,6 +165,30 @@ This plugin interacts with hosting accounts and therefore deserves careful secur
 
 See [`SECURITY.md`](SECURITY.md).
 
+## Support the author
+
+If cPanel Hosting Deploy saves you time or helps protect your deployment workflow, you can support continued development.
+
+- [PayPal](https://paypal.me/gabrijelbaban)
+- [Revolut](https://revolut.me/glcvr6)
+- [Genome](https://pay.genome.eu/pay?p=dT0xMDUxMDk3ODAwMDc2NDc1NjY0JnQ9MTc5MTQ2MzAzNyZuPUdBQlJJSkVMJTIwQkFCQU4maT1MVDQ4MzExMDAyNzE0NjM2NDUxMyZiPU1OTkVMVDIxWFhYJmM9RVVS)
+- **Binance Pay ID:** `146307213`
+
+### Crypto donation addresses
+
+| Asset | Network | Address |
+|---|---|---|
+| BTC | Bitcoin | `142uQqSCfAGTFT2EzP3mVXwyFcoo71eic5` |
+| USDT | TRC20 | `TCSVbhScGJLfs1qo5MKRMFLyGtGxsbNmyU` |
+| USDT | ERC20 / BEP20 | `0xbc404ef40b46979cde3ffef4696cace3054dafd9` |
+| ETH | ERC20 | `0xbc404ef40b46979cde3ffef4696cace3054dafd9` |
+| BNB | BEP20 | `0xbc404ef40b46979cde3ffef4696cace3054dafd9` |
+| USDC | ERC20 / BEP20 | `0xbc404ef40b46979cde3ffef4696cace3054dafd9` |
+
+> **Important:** Always verify the network before sending cryptocurrency. Sending an asset over an unsupported network can permanently lose the funds.
+
+For the full donation details, see [`SUPPORT.md`](SUPPORT.md).
+
 ## Project documentation
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — technical architecture

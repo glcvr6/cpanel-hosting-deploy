@@ -27,16 +27,48 @@ If this project is useful to you, you can support its continued development.
 **Author:** Gabrijel Baban  
 **Project:** [cPanel Hosting Deploy](https://github.com/glcvr6/cpanel-hosting-deploy)
 
-### Donation methods
+### PayPal
 
-The project supports:
+[Donate via PayPal](https://paypal.me/gabrijelbaban)
 
-- **PayPal**
-- **Revolut**
-- **Genome**
-- **Cryptocurrency**
-- **Binance**
+### Revolut
 
-The exact public donation links, usernames, and wallet addresses are intentionally not guessed or generated automatically. They should be added only after the author confirms the exact public identifiers.
+[Donate via Revolut](https://revolut.me/glcvr6)
 
-> **Security note:** Never send API tokens, passwords, private keys, seed phrases, or other secrets through GitHub Issues, pull requests, or public discussions.
+### Genome
+
+[Donate via Genome](https://pay.genome.eu/pay?p=dT0xMDUxMDk3ODAwMDc2NDc1NjY0JnQ9MTc5MTQ2MzAzNyZuPUdBQlJJSkVMJTIwQkFCQU4maT1MVDQ4MzExMDAyNzE0NjM2NDUxMyZiPU1OTkVMVDIxWFhYJmM9RVVS)
+
+### Binance Pay
+
+**Binance Pay ID:** `146307213`
+
+### Cryptocurrency
+
+#### Bitcoin
+
+`142uQqSCfAGTFT2EzP3mVXwyFcoo71eic5`
+
+#### USDT — TRC20
+
+`TCSVbhScGJLfs1qo5MKRMFLyGtGxsbNmyU`
+
+#### USDT — ERC20 / BEP20
+
+`0xbc404ef40b46979cde3ffef4696cace3054dafd9`
+
+#### ETH — ERC20
+
+`0xbc404ef40b46979cde3ffef4696cace3054dafd9`
+
+#### BNB — BEP20
+
+`0xbc404ef40b46979cde3ffef4696cace3054dafd9`
+
+#### USDC — ERC20 / BEP20
+
+`0xbc404ef40b46979cde3ffef4696cace3054dafd9`
+
+> **Important:** Always verify the network before sending cryptocurrency. Sending an asset over an unsupported network can permanently lose the funds.
+
+> **Security note:** These are public donation addresses/links. Never send API tokens, passwords, private keys, seed phrases, or other secrets through GitHub Issues, pull requests, or public discussions.
