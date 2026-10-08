@@ -8,7 +8,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
-const VERSION = '1.11.2';
+const VERSION = '1.11.3';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];
@@ -527,17 +527,42 @@ async function withOperationLock(c,operation,fn){
   const dir=path.join(WORKSPACE,'.hosting');
   const lockPath=path.join(dir,'operation.lock');
   await fsp.mkdir(dir,{recursive:true});
+
+  async function acquire(){
+    try{return await fsp.open(lockPath,'wx');}
+    catch(e){
+      if(e.code!=='EEXIST') throw e;
+
+      let raw='';
+      try{raw=(await fsp.readFile(lockPath,'utf8')).trim();}catch(readError){
+        throw new Error('Another cPanel Hosting Deploy operation is already running; its lock could not be inspected safely.');
+      }
+
+      let owner=null;
+      try{owner=JSON.parse(raw);}catch(_){}
+      if(!owner || !Number.isInteger(Number(owner.pid)) || Number(owner.pid)<=0){
+        throw new Error('Another cPanel Hosting Deploy operation is already running; the lock metadata is invalid. Remove .hosting/operation.lock only after confirming no deployment/sync operation is active.');
+      }
+
+      try{
+        process.kill(Number(owner.pid),0);
+      }catch(pidError){
+        if(pidError.code==='ESRCH'){
+          try{await fsp.unlink(lockPath);}catch(unlinkError){
+            if(unlinkError.code!=='ENOENT') throw unlinkError;
+          }
+          return await fsp.open(lockPath,'wx');
+        }
+        throw new Error('Another cPanel Hosting Deploy operation is already running (PID '+owner.pid+').');
+      }
+
+      throw new Error('Another cPanel Hosting Deploy operation is already running: '+raw);
+    }
+  }
+
   let handle;
   try{
-    try{handle=await fsp.open(lockPath,'wx');}
-    catch(e){
-      if(e.code==='EEXIST'){
-        let owner='another operation';
-        try{owner=(await fsp.readFile(lockPath,'utf8')).trim()||owner;}catch(_){}
-        throw new Error('Another cPanel Hosting Deploy operation is already running: '+owner);
-      }
-      throw e;
-    }
+    handle=await acquire();
     await handle.writeFile(JSON.stringify({operation,pid:process.pid,createdAt:new Date().toISOString()}));
     return await fn();
   }finally{
@@ -546,7 +571,25 @@ async function withOperationLock(c,operation,fn){
   }
 }
 async function writeReport(c,title,data){if(!protectionEnabled(c,'reports'))return null;const dir=reportRoot();await fsp.mkdir(dir,{recursive:true});const stamp=new Date().toISOString().replace(/[:.]/g,'-');let p=path.join(dir,`${stamp}-${title}.md`),n=1;while(fs.existsSync(p))p=path.join(dir,`${stamp}-${title}.${n++}.md`);await fsp.writeFile(p,`# ${title}\n\nConnection: ${c.name}\nTime: ${new Date().toISOString()}\n\n\`\`\`json\n${JSON.stringify(data,null,2)}\n\`\`\`\n`,'utf8');return p;}
-async function cleanupRetention(dir,limit){try{await fsp.mkdir(dir,{recursive:true});const files=(await fsp.readdir(dir,{withFileTypes:true})).filter(x=>x.isFile()).map(x=>x.name).sort().reverse();for(const f of files.slice(limit))await fsp.unlink(path.join(dir,f));}catch(e){log(`Retention cleanup failed: ${e.message}`);}}
+async function cleanupRetention(dir,limit){
+  try{
+    await fsp.mkdir(dir,{recursive:true});
+    const files=[];
+    async function walk(current){
+      for(const ent of await fsp.readdir(current,{withFileTypes:true})){
+        const full=path.join(current,ent.name);
+        if(ent.isDirectory()) await walk(full);
+        else if(ent.isFile()){
+          const st=await fsp.stat(full);
+          files.push({path:full,mtime:st.mtimeMs});
+        }
+      }
+    }
+    await walk(dir);
+    files.sort((a,b)=>b.mtime-a.mtime);
+    for(const item of files.slice(Math.max(0,Number(limit)||0))) await fsp.unlink(item.path);
+  }catch(e){log(`Retention cleanup failed: ${e.message}`);}
+}
 function acceptedStateKey(c,rel){return `${c.name}::${rel}`;}
 async function getAccepted(c,rel){const st=await loadProtectionState();return st.accepted?.[acceptedStateKey(c,rel)]||null;}
 async function setAccepted(c,rel,value){const st=await loadProtectionState();st.accepted=st.accepted||{};const k=acceptedStateKey(c,rel);if(value)st.accepted[k]=value;else delete st.accepted[k];await saveProtectionState(st);}
