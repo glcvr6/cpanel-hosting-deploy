@@ -1,3 +1,10 @@
+## [1.11.7] - 2026-10-08
+
+### Fixed
+- Serialize add, edit, remove, and settings mutations of the shared connections store under a dedicated stale-lock-safe transaction lock.
+- Replace the shared connections temp file with unique atomic state writes.
+- Reject connection renames that collide with an existing connection name.
+
 ## [1.11.6] - 2026-10-08
 
 ### Fixed
