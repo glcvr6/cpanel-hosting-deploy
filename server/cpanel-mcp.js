@@ -8,8 +8,62 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
-const VERSION = '1.11.0';
-const WORKSPACE = process.env.CURSOR_WORKSPACE || process.cwd();
+const VERSION = '1.11.1';
+
+function parseWorkspaceCandidates(raw) {
+  if (!raw) return [];
+  const value = String(raw).trim();
+  if (!value || value === '${workspaceFolder}' || value.includes('${workspaceFolder}')) return [];
+
+  // Cursor provides the active workspace through WORKSPACE_FOLDER_PATHS.
+  // Be defensive about multi-root representations and unresolved placeholders.
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.flatMap(parseWorkspaceCandidates);
+    if (typeof parsed === 'string') return parseWorkspaceCandidates(parsed);
+  } catch (_) {}
+
+  if (process.platform === 'win32' && value.includes(';')) {
+    return value.split(';').map(x => x.trim()).filter(Boolean);
+  }
+  if (process.platform !== 'win32' && value.includes(':') && !value.startsWith('/')) {
+    return value.split(':').map(x => x.trim()).filter(Boolean);
+  }
+  return [value];
+}
+
+function resolveWorkspace() {
+  const sources = [
+    ['CURSOR_PROJECT_DIR', process.env.CURSOR_PROJECT_DIR],
+    ['WORKSPACE_FOLDER_PATHS', process.env.WORKSPACE_FOLDER_PATHS],
+    ['CURSOR_WORKSPACE', process.env.CURSOR_WORKSPACE],
+    ['VSCODE_CWD', process.env.VSCODE_CWD]
+  ];
+
+  for (const [source, raw] of sources) {
+    for (const candidate of parseWorkspaceCandidates(raw)) {
+      const resolved = path.resolve(candidate.replace(/^"|"$/g, ''));
+      try {
+        if (fs.statSync(resolved).isDirectory()) return {path: resolved, source};
+      } catch (_) {}
+    }
+  }
+
+  // In Cursor a plugin MCP server normally runs with the plugin cwd, so do not
+  // silently mistake the plugin directory for the user's project.
+  const cwd = path.resolve(process.cwd());
+  const pluginRoot = process.env.CURSOR_PLUGIN_ROOT ? path.resolve(process.env.CURSOR_PLUGIN_ROOT) : null;
+  if (!pluginRoot || cwd !== pluginRoot) return {path: cwd, source:'process.cwd()'};
+
+  throw new Error(
+    'Unable to determine the Cursor workspace. Cursor did not provide WORKSPACE_FOLDER_PATHS/CURSOR_PROJECT_DIR. ' +
+    'Restart Cursor and reload the plugin, then retry.'
+  );
+}
+
+const WORKSPACE_INFO = resolveWorkspace();
+const WORKSPACE = WORKSPACE_INFO.path;
+const WORKSPACE_SOURCE = WORKSPACE_INFO.source;
 const APP_DIR = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'cPanel Hosting Deploy');
 const CONNECTIONS_FILE = path.join(APP_DIR, 'connections.json');
 const DEFAULT_EXCLUDE = ['node_modules', '.git', '.env', 'logs'];
@@ -675,6 +729,7 @@ async function workspaceState(c){
   const mappedLocalExists = mappingRoots.some(x=>x.exists);
   return {
     workspace: WORKSPACE,
+    workspaceSource: WORKSPACE_SOURCE,
     state: !hasLocalContent ? 'EMPTY' : (mappings.length ? 'EXISTING_OR_MAPPED' : 'EXISTING_UNMAPPED'),
     hasLocalContent,
     totalFiles,
