@@ -617,10 +617,16 @@ async function remoteSync(c, actions, confirm){
       const local=localPathForRel(item.path);
       if(item.status==='REMOTE DELETED'){
         if(action.confirmation!=='DELETE_LOCAL') throw new Error('Syncing REMOTE DELETED requires confirmation value DELETE_LOCAL.');
+        if(protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'localBackups')){
+          await copyLocalBackup(item.path,'remote-deleted');
+        }
         await fsp.rm(local,{force:true});
         const manifest=await loadManifest(); delete manifest[item.path]; await saveManifest(manifest);
       } else {
         if(item.status==='REMOTE CHANGED' && action.confirmation!=='OVERWRITE_LOCAL') throw new Error('Syncing REMOTE CHANGED requires confirmation value OVERWRITE_LOCAL.');
+        if(item.status==='REMOTE CHANGED' && protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'localBackups')){
+          await copyLocalBackup(item.path,'remote-overwritten');
+        }
         const hash=await downloadOne(c,item.remote,item.path,true);
         const manifest=await loadManifest(); manifest[item.path]=hash; await saveManifest(manifest);
       }
@@ -899,6 +905,9 @@ async function deploy(c, confirm, deletionActions=[], confirmation='') {
     try{
       const remote=remoteFromRel(c,item.relativePath);
       if(!allowedRemote(c,remote)) throw new Error('Remote path is outside configured folders.');
+      if(item.status==='CHANGED' && protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'remoteBackups')){
+        await remoteBackup(c,remote,item.relativePath,'remote-overwritten');
+      }
       await ensureRemoteDir(c,path.posix.dirname(remote));
       await apiUpload(c,path.posix.dirname(remote),item.localPath);
       manifest[item.relativePath]=item.hash;
@@ -920,6 +929,9 @@ async function deploy(c, confirm, deletionActions=[], confirmation='') {
         restored.push(item.relativePath);
       } else if(action.action==='delete') {
         if(String(action.confirmation||'')!=='DELETE') throw new Error('Remote deletion requires confirmation value DELETE.');
+        if(protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'remoteBackups')){
+          await remoteBackup(c,remote,item.relativePath,'local-deleted');
+        }
         await api2FileOp(c,'trash',remote);
         delete manifest[item.relativePath];
         await saveManifest(manifest);
@@ -1042,7 +1054,12 @@ async function callTool(name,a){
       }
     }
     const manifest=await loadManifest(),uploaded=[],failed=[];
-    for(const f of files){try{await ensureRemoteDir(c,path.posix.dirname(f.remote));await apiUpload(c,path.posix.dirname(f.remote),path.join(WORKSPACE,...f.path.split('/')));manifest[f.path]=sha256(path.join(WORKSPACE,...f.path.split('/')));await saveManifest(manifest);uploaded.push(f.path);}catch(e){failed.push({path:f.path,error:e.message});}}
+    for(const f of files){try{
+      if(protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'remoteBackups')){
+        const remoteFiles=await listRemoteFiles(c);
+        if(remoteFiles.has(f.remote)) await remoteBackup(c,f.remote,f.path,'remote-overwritten');
+      }
+      await ensureRemoteDir(c,path.posix.dirname(f.remote));await apiUpload(c,path.posix.dirname(f.remote),path.join(WORKSPACE,...f.path.split('/')));manifest[f.path]=sha256(path.join(WORKSPACE,...f.path.split('/')));await saveManifest(manifest);uploaded.push(f.path);}catch(e){failed.push({path:f.path,error:e.message});}}
     return {requiresConfirmation:false,connection:c.name,uploaded,failed,message:`Full upload completed: ${uploaded.length} uploaded, ${failed.length} failed.`};
   }
   if(name==='cpanel_remote_status'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);if(st.protectionMode==='OFF') return await buildRemoteStatus(c);const r=await buildRemoteStatusProtected(c);r.protection=protectionWarning(c);return r;}
