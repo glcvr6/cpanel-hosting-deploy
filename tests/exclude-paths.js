@@ -3,7 +3,7 @@ const source=fs.readFileSync(path.join(__dirname,'..','server','cpanel-mcp.js'),
 const match=source.match(/function normalizeExcludePath\([\s\S]*?\n\}\nfunction mappingForLocal/);
 if(!match) throw Error('exclude helper source not found');
 const helperSource=match[0].replace(/\nfunction mappingForLocal[\s\S]*$/,'');
-const excluded=vm.runInNewContext(`(() => { ${helperSource}; return excluded; })()`,{path});
+const excluded=vm.runInNewContext(`(() => { const isIgnoredProtectionPath=()=>false; ${helperSource}; return excluded; })()`,{path});
 
 const cases=[
   ['donatorske-znacke/public/uploads/test.png',['donatorske-znacke/public/uploads'],true],
