@@ -3,7 +3,7 @@
 ## Project identity
 
 **Name:** cPanel Hosting Deploy  
-**Version:** 1.11.0  
+**Version:** 1.11.1  
 **Author:** Gabrijel Baban  
 **Repository:** https://github.com/glcvr6/cpanel-hosting-deploy
 
@@ -23,4 +23,6 @@ The distributed package must not contain:
 
 ## Release messaging
 
-v1.11.0 should be presented accurately: Protection is implemented and configurable, while systematic real-world Protection testing is the next development phase. The project welcomes controlled community testing.
+v1.11.1 should be presented accurately
+
+The 1.11.1 patch also fixes workspace resolution for Marketplace-installed MCP servers: Protection is implemented and configurable, while systematic real-world Protection testing is the next development phase. The project welcomes controlled community testing.
