@@ -908,7 +908,7 @@ async function buildPlanUnlocked(c){
   // workspace has never deployed through this plugin before.
   let remoteFiles = null;
   const needRemoteBaseline = (c.mappings||[]).some(m=>m.enabled!==false) &&
-    (()=>{
+    (async()=>{
       for (const m of (c.mappings||[])) {
         if (m.enabled===false) continue;
         const root=path.join(WORKSPACE,...m.local.split('/'));
@@ -920,7 +920,7 @@ async function buildPlanUnlocked(c){
       }
       return false;
     })();
-  if (needRemoteBaseline) {
+  if (await needRemoteBaseline) {
     remoteFiles = await listRemoteFiles(c);
   }
 
