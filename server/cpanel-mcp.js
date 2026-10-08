@@ -247,8 +247,8 @@ undefinedrmData();
   form.append('dir',remoteDir);
   form.append('overwrite','1');
   form.append('file-1',new Blob([data]),path.basename(localFile));
-  const token=revealToken(c.tokenEncrypted);
-  const r=await fetch(`${c.host}/execute/Fileman/upload_files`,{method:'POST',headers:{'Authorization':`cpanel ${c.username}:${token}`},body:form});
+  const headers=authHeaders(c);
+  const r=await fetch(`${c.host}/execute/Fileman/upload_files`,{method:'POST',headers,body:form});
   const text=await r.text();
   let j; try{j=JSON.parse(text);}catch(_){throw new Error(`Upload returned non-JSON response (${r.status}).`);}
   if (!r.ok || j.status !== 1) throw new Error((j.errors||[]).join('; ') || `Upload failed with HTTP ${r.status}`);
