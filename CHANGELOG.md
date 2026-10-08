@@ -1,4 +1,4 @@
-## [1.13.0] - 2026-10-08
+## [1.13.1] - 2026-10-08
 
 ### Fixed
 - Serialize deployment-manifest read-modify-write transactions with a dedicated lock.
