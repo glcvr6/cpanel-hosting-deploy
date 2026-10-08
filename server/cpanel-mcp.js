@@ -232,6 +232,8 @@ async function getConnection(name) {
 }
 
 function authHeaders(c) {
+  const u=new URL(c.host);
+  if(u.protocol!=='https:') throw new Error('cPanel host must use HTTPS so the API token is not sent over cleartext HTTP.');
   const token=revealToken(c.tokenEncrypted);
   return {'Authorization':`cpanel ${c.username}:${token}`};
 }
