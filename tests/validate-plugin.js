@@ -1,7 +1,7 @@
 const fs=require('fs'),path=require('path'),cp=require('child_process');
 const root=path.resolve(__dirname,'..');
 const m=JSON.parse(fs.readFileSync(path.join(root,'.cursor-plugin/plugin.json')));
-if(m.version!=='1.11.1') throw Error('manifest version mismatch');
+if(m.version!=='1.11.3') throw Error('manifest version mismatch');
 if(m.author?.name!=='Gabrijel Baban') throw Error('author mismatch');
 if(m.repository!=='https://github.com/glcvr6/cpanel-hosting-deploy') throw Error('repository mismatch');
 for(const f of ['server/cpanel-mcp.js','mcp.json','commands/cpanel-hosting-settings.md','skills/cpanel-settings/SKILL.md']) if(!fs.existsSync(path.join(root,f))) throw Error('missing '+f);
@@ -18,4 +18,4 @@ cp.execFileSync(process.execPath,[path.join(root,'tests/transfer-retry.js')],{st
 cp.execFileSync(process.execPath,[path.join(root,'tests/operation-safety.js')],{stdio:'inherit'});
 cp.execFileSync(process.execPath,[path.join(root,'tests/partial-success-baseline.js')],{stdio:'inherit'});
 cp.execFileSync(process.execPath,[path.join(root,'tests/security-boundaries.js')],{stdio:'inherit'});
-console.log('cPanel Hosting Deploy 1.11.1 validation: PASS');
+console.log('cPanel Hosting Deploy 1.11.3 validation: PASS');
