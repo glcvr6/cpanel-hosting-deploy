@@ -13,5 +13,7 @@ assert(manifestBlock.includes("throw new Error('Deployment manifest is unreadabl
 const remoteBlock=source.slice(source.indexOf('async function loadRemoteMeta()'),source.indexOf('async function saveRemoteMeta'));
 assert(remoteBlock.includes("if(e.code==='ENOENT') return {};"),'missing remote baseline must remain recoverable');
 assert(remoteBlock.includes("throw new Error('Remote baseline is unreadable or corrupted: '+e.message);"),'remote baseline read/parse errors must not be swallowed');
+const protectedStatus=source.slice(source.indexOf("async function buildRemoteStatusProtected"),source.indexOf("\nasync function remoteSync"));
+assert(protectedStatus.includes("if(advanceBaseline && !hasDifferences) await saveRemoteMeta(current);"),'protected remote baseline must only advance when there are no differences');
 
 console.log('State recovery regression: PASS');
