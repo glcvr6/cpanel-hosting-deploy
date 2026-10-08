@@ -6,11 +6,17 @@ assert(s.includes("async function api2FileOp(c,op,sourcefiles)"),'remote delete 
 assert(s.includes("cpanel_jsonapi_apiversion','2'"),'API2 version missing');
 assert(s.includes("async function withOperationLock(c,operation,fn)"),'operation lock helper missing');
 assert(s.includes("fss.open(lockPath,'wx')") || s.includes("fsp.open(lockPath,'wx')"),'lock must use exclusive file creation');
+assert(s.includes("process.kill(Number(owner.pid),0)"),'lock recovery must verify whether the recorded owner process is still alive');
+assert(s.includes("pidError.code==='ESRCH'"),'lock recovery must distinguish a stale dead-process lock from an active lock');
+assert(s.includes("lock metadata is invalid"),'invalid lock metadata must fail closed');
 assert(s.includes("protectionEnabled(c,'locks')"),'lock protection gate missing');
 assert(s.includes("cleanupRetention(backupRoot(),normalizeSettings(c.settings).backupRetention)"),'local backup retention cleanup missing');
+assert(s.includes("async function walk(current)"),'local backup retention must recurse into nested backup directories');
+assert(s.includes("files.sort((a,b)=>b.mtime-a.mtime)"),'local backup retention must use modification time rather than filename order');
 assert(s.includes("async function cleanupRemoteBackups(c)"),'remote backup retention cleanup missing');
 assert(s.includes("api2FileOp(c,'trash',item.path)"),'remote backup retention must use trash operation');
 assert(s.includes("withOperationLock(c,'deploy'"),'deploy lock missing');
 assert(s.includes("withOperationLock(c,'remote-sync'"),'remote sync lock missing');
 assert(s.includes("withOperationLock(c,'workspace-setup'"),'workspace setup lock missing');
+assert(s.includes("const VERSION = '1.11.3';"),'server version must match the current release');
 console.log('Operation safety regression: PASS');
