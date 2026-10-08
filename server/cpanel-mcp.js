@@ -261,17 +261,17 @@ function relativePosix(full){
   return rel;
 }
 function normalizeExcludePath(value){
-  return String(value||'')
-    .trim()
-    .replaceAll('\\\\','/')
-    .replace(/^\\/+|\\/+$/g,'')
-    .replace(/^\.\\//,'')
-    .toLowerCase();
+  let x=String(value||'').trim().replaceAll('\\\\','/');
+  while(x.startsWith('/')) x=x.slice(1);
+  while(x.endsWith('/')) x=x.slice(0,-1);
+  if(x.startsWith('./')) x=x.slice(2);
+  return x.toLowerCase();
 }
 function excluded(rel, list){
-  const normalizedRel=String(rel||'')
-    .replaceAll('\\\\','/')
-    .replace(/^\\/+|\\/+$/g,'');
+  let normalizedRel=String(rel||'').replaceAll('\\\\','/');
+  while(normalizedRel.startsWith('/')) normalizedRel=normalizedRel.slice(1);
+  while(normalizedRel.endsWith('/')) normalizedRel=normalizedRel.slice(0,-1);
+
   const normalizedRelLower=normalizedRel.toLowerCase();
   const parts=normalizedRelLower.split('/').filter(Boolean);
 
