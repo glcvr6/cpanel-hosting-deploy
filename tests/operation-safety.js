@@ -38,5 +38,5 @@ assert(s.includes("async function buildPlan(c)"),'build plan wrapper missing');
 assert(s.includes("return await withManifestLock(()=>buildPlanUnlocked(c));"),'build plan must serialize manifest read-modify-write state');
 assert(s.includes("st.isSymbolicLink()"),'symbolic links must be rejected in deployment paths');
 assert(s.includes("AbortSignal.timeout(120000)"),'cPanel API calls must have bounded timeouts');
-assert(s.includes("const VERSION = '1.13.0';"),'server version must match the current release');
+assert(s.includes("const VERSION = '1.13.1';"),'server version must match the current release');
 console.log('Operation safety regression: PASS');

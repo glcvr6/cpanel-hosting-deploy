@@ -22,7 +22,8 @@ const bootstrap=source.slice(source.indexOf("async function bootstrapDefault()")
 assert(bootstrap.includes("withConnectionsStoreLock(async()=>"),'default bootstrap must lock the full store transaction');
 const sync=source.slice(source.indexOf("async function syncDefaultFromEnv()"),source.indexOf("\nconst TOOLS="));
 assert(sync.includes("withConnectionsStoreLock(async()=>"),'default name synchronization must lock the full store transaction');
-assert(source.includes("await fsp.open(CONNECTIONS_FILE,'wx')"),'first-run store creation must use exclusive file creation');
+assert(source.includes("connections-store-init"),'first-run store creation must use the dedicated connections-store initialization lock');
+assert(source.includes("await atomicJsonWrite(CONNECTIONS_FILE,{version:1,connections:[]})"),'first-run store creation must be atomic');
 assert(source.includes("Connections store is unreadable or corrupted:"),'malformed connections store must fail closed');
 
 console.log('Connections store concurrency regression: PASS');
