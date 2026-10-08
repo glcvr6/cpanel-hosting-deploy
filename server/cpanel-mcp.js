@@ -858,7 +858,7 @@ async function initializeWorkspaceFromHost(c, mappings, confirm){
   };
 }
 
-async function deploy(c, confirm, deletionActions=[]) {
+async function deploy(c, confirm, deletionActions=[], confirmation='') {
   const plan=await buildPlan(c);
   const uploadItems=plan.filter(x=>x.status==='NEW'||x.status==='CHANGED');
   const deletedItems=plan.filter(x=>x.status==='DELETED');
@@ -878,6 +878,18 @@ async function deploy(c, confirm, deletionActions=[]) {
       ? 'No hosting changes were made. Review NEW/CHANGED uploads and the DELETED LOCAL files. Deleted-local files can be restored from hosting, explicitly deleted from hosting, or left unchanged.'
       : 'No files were uploaded. Review the plan, then call deploy again with confirm=true after explicit user confirmation.'
   };
+
+  const protection = normalizeSettings(c.settings);
+  const overwriteTargets = uploadItems.filter(x=>x.status==='CHANGED');
+  if (protectionEnabled(c,'overwriteConfirmation') && overwriteTargets.length &&
+      String(confirmation||'').toUpperCase()!=='OVERWRITE') {
+    return {
+      requiresConfirmation:true,
+      protectionConfirmation:'OVERWRITE',
+      summary,
+      message:'Protection requires the confirmation keyword OVERWRITE because one or more local CHANGED files will overwrite existing hosting files. No hosting changes were made.'
+    };
+  }
 
   const manifest=await loadManifest();
   const uploaded=[]; const failed=[]; const restored=[]; const restoreFailed=[]; const deleted=[]; const deleteFailed=[]; const kept=[];
@@ -980,7 +992,7 @@ const TOOLS=[ {name:'cpanel_get_settings',description:'Get per-connection Protec
  {name:'cpanel_workspace_setup',description:'Safely initialize a local workspace from selected remote cPanel folders. This mode only writes into missing or genuinely empty local folders and never overwrites existing project files.',inputSchema:{type:'object',properties:{name:{type:'string'},mappings:{type:'array',items:{type:'object',properties:{local:{type:'string'},remote:{type:'string'},enabled:{type:'boolean'}},required:['local','remote']}},confirm:{type:'boolean'}},required:['name','mappings','confirm']}},
  {name:'cpanel_workspace_state',description:'Read-only check of the current local workspace state. Call this before onboarding or changing mappings.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}},
  {name:'cpanel_deploy_plan',description:'Build a local deployment plan. Never modifies hosting.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}},
- {name:'cpanel_deploy',description:'Deploy NEW and CHANGED files. DELETED local files are never deleted remotely automatically; provide explicit per-file actions restore, delete (requires confirmation DELETE), or keep.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'},deletionActions:{type:'array',items:{type:'object',properties:{path:{type:'string'},action:{type:'string',enum:['restore','delete','keep']},confirmation:{type:'string'}},required:['path','action']}}},required:['name','confirm']}},
+ {name:'cpanel_deploy',description:'Deploy NEW and CHANGED files. Protection may require OVERWRITE for CHANGED files. DELETED local files are never deleted remotely automatically; provide explicit per-file actions restore, delete (requires confirmation DELETE), or keep.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'},confirmation:{type:'string'},deletionActions:{type:'array',items:{type:'object',properties:{path:{type:'string'},action:{type:'string',enum:['restore','delete','keep']},confirmation:{type:'string'}},required:['path','action']}}},required:['name','confirm']}},
  {name:'cpanel_local_upload',description:'Explicit full local-to-remote upload. Overwrites existing remote files and adds new local files after explicit confirmation.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'}},required:['name','confirm']}},
  {name:'cpanel_remote_status',description:'Read-only remote-to-local comparison. Detect REMOTE NEW, REMOTE CHANGED, and REMOTE DELETED using a saved remote metadata baseline. Never modifies local files except the remote metadata observation file.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}},
  {name:'cpanel_remote_sync',description:'Synchronize explicitly selected remote changes into the local workspace. REMOTE CHANGED requires OVERWRITE_LOCAL confirmation; REMOTE DELETED requires DELETE_LOCAL confirmation.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'},actions:{type:'array',items:{type:'object',properties:{path:{type:'string'},action:{type:'string',enum:['sync','keep']},confirmation:{type:'string'}},required:['path','action']}}},required:['name','confirm']}},
@@ -1014,7 +1026,7 @@ async function callTool(name,a){
   if(name==='cpanel_deploy_plan'){const c=await getConnection(a.name);const plan=await buildPlan(c);return {connection:c.name,summary:{new:plan.filter(x=>x.status==='NEW').length,changed:plan.filter(x=>x.status==='CHANGED').length,unchanged:plan.filter(x=>x.status==='UNCHANGED').length,deleted:plan.filter(x=>x.status==='DELETED').length},files:plan.filter(x=>x.status!=='UNCHANGED').map(x=>({status:x.status,path:x.relativePath,size:x.size}))};}
   if(name==='cpanel_deploy'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);const plan=await buildPlan(c);const accepted=[];if(st.protectionMode!=='OFF'&&protectionEnabled(c,'acceptedAutomatic')){for(const x of plan.filter(x=>x.status==='CHANGED'||x.status==='NEW')){const ac=await getAccepted(c,x.relativePath);if(ac?.side==='LOCAL')accepted.push(x);}}
     if(st.autoDeploy&&accepted.length){const actions=accepted.map(x=>({path:x.relativePath,auto:true}));if(!a.confirm){return {requiresConfirmation:false,autoAccepted:true,warning:protectionWarning(c),acceptedLocal:actions,message:'Auto Deploy is ON. Accepted Local files will be uploaded when the deploy command is manually invoked.'};}}
-    const r=await deploy(c,Boolean(a.confirm)||Boolean(st.autoDeploy&&accepted.length),a.deletionActions||[]);if(st.protectionMode==='OFF') return r;if(r && accepted.length)r.acceptedLocal=accepted.map(x=>x.relativePath);r.protection=protectionWarning(c);return r;}
+    const r=await deploy(c,Boolean(a.confirm)||Boolean(st.autoDeploy&&accepted.length),a.deletionActions||[],a.confirmation||'');if(st.protectionMode==='OFF') return r;if(r && accepted.length)r.acceptedLocal=accepted.map(x=>x.relativePath);r.protection=protectionWarning(c);return r;}
   if(name==='cpanel_local_upload'){
     const c=await getConnection(a.name);
     const files=[];
