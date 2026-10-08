@@ -1,3 +1,10 @@
+## [1.11.8] - 2026-10-08
+
+### Fixed
+- Revalidate the live remote file state immediately before deploy uploads, restores, and remote deletions so stale observations cannot silently overwrite newer hosting changes.
+- Revalidate remote-sync actions against the snapshot shown to the user before downloading or deleting local files.
+- Remove the unused remote-pending journal that was written but never consumed for recovery.
+
 ## [1.11.7] - 2026-10-08
 
 ### Fixed
