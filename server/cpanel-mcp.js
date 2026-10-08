@@ -8,7 +8,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
-const VERSION = '1.11.6';
+const VERSION = '1.11.7';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];
@@ -144,10 +144,10 @@ async function loadStore() {
   return JSON.parse(raw);
 }
 async function saveStore(store) {
-  await ensureStore();
-  const tmp = CONNECTIONS_FILE + '.tmp';
-  await fsp.writeFile(tmp, JSON.stringify(store, null, 2), 'utf8');
-  await fsp.rename(tmp, CONNECTIONS_FILE);
+  await atomicJsonWrite(CONNECTIONS_FILE,store);
+}
+async function withConnectionsStoreLock(fn){
+  return await withFileLock(path.join(APP_DIR,'connections-store.lock'),'connections-store',fn);
 }
 
 function protectToken(token) {
