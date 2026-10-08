@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "cpanel-hosting-deploy": {
+      "command": "node",
+      "args": [
+        "${CURSOR_PLUGIN_ROOT}/server/cpanel-mcp.js"
+      ],
+      "cwd": "${CURSOR_PLUGIN_ROOT}",
+      "env": {
+        "CURSOR_WORKSPACE": "${workspaceFolder}"
+      }
+    }
+  }
+}

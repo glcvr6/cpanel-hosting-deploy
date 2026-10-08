@@ -1,0 +1,15 @@
+---
+description: Safe cPanel deployment rules
+alwaysApply: false
+---
+When using the cPanel Hosting Deploy plugin:
+- Treat the local workspace as the source of truth.
+- Never download from hosting unless the user explicitly requests it.
+- Never delete remote files during normal deployment.
+- Deploy only files reported as NEW or CHANGED.
+- Never print, expose, commit, or paste CPANEL_API_TOKEN or stored connection tokens.
+- Inspect the deployment plan before changing hosting.
+- Require explicit user confirmation before production changes.
+- Report exactly what was uploaded and any failures.
+
+- On a first-time mapping with an empty manifest, establish a read-only remote SHA-256 baseline before classifying files. Never upload or overwrite local files during baseline creation.

@@ -1,5 +1,202 @@
 # cPanel Hosting Deploy
 
-Safe cPanel deployment and remote synchronization for Cursor.
+[![CI](https://github.com/glcvr6/cpanel-hosting-deploy/actions/workflows/ci.yml/badge.svg)](https://github.com/glcvr6/cpanel-hosting-deploy/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-1.11.0-blue.svg)](https://github.com/glcvr6/cpanel-hosting-deploy/releases)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Version 1.11.0
+**A generic Cursor plugin for safe local-to-cPanel deployment and remote synchronization.**
+
+cPanel Hosting Deploy connects a Cursor workspace to one or more cPanel accounts, tracks file state with SHA-256 baselines, detects local and remote changes, identifies conflicts, and keeps destructive actions explicit.
+
+> **v1.11.0:** Protection is implemented with `SECURED`, `CUSTOM`, and `OFF` modes. The next development phase is systematic real-world testing of the Protection policies. Community testing on non-production cPanel accounts is welcome.
+
+## Why this project?
+
+Typical FTP-style deployment workflows make it easy to overwrite or delete the wrong thing. This project is designed around a different principle:
+
+**show the state, explain the consequence, and require an explicit decision when the operation is risky.**
+
+### Highlights
+
+- Local ↔ cPanel deployment through Cursor.
+- Multiple named cPanel connections.
+- Flexible local-to-remote folder mappings.
+- SHA-256 baseline tracking.
+- Local `NEW`, `CHANGED`, `DELETED`, `UNCHANGED` detection.
+- Remote `REMOTE NEW`, `REMOTE CHANGED`, `REMOTE DELETED`, `REMOTE UNTRACKED` detection.
+- `CONFLICT` detection when local and remote both diverge.
+- Explicit remote synchronization choices.
+- Remote deletion routed through cPanel trash behavior where supported.
+- Configurable Protection modes: `OFF`, `CUSTOM`, `SECURED`.
+- Credential-clean distribution.
+- Windows DPAPI credential protection in the local workflow.
+- Retry/partial-success handling and reporting architecture.
+
+## Installation
+
+Install the plugin through the Cursor plugin/marketplace workflow or use the repository package for development/testing.
+
+The distributed plugin contains **no real hosting credentials, customer mappings, API tokens, or customer data**.
+
+After installation:
+
+1. Open the plugin configuration in Cursor.
+2. Enter a connection name, cPanel host, username, remote root, and API token.
+3. Configure the local ↔ remote mappings.
+4. Start with `/cpanel`.
+5. For a new or sensitive environment, inspect `/cpanel-remote-status` before changing anything remotely.
+
+See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for details.
+
+## Core commands
+
+| Command | Purpose |
+|---|---|
+| `/cpanel` | Main menu |
+| `/cpanel-hosting-help` | Help and command reference |
+| `/cpanel-hosting-config` | Connections and mappings |
+| `/cpanel-hosting-settings` | Protection/settings |
+| `/cpanel-hosting-connections` | Workspace onboarding |
+| `/cpanel-local-status` | Local deployment status |
+| `/cpanel-local-deploy` | Deploy local changes |
+| `/cpanel-local-upload` | Upload selected local content |
+| `/cpanel-remote-status` | Remote change detection |
+| `/cpanel-remote-sync` | Remote reconciliation |
+| `/cpanel-remote-download` | Explicit remote download |
+
+Full details: [`docs/COMMANDS.md`](docs/COMMANDS.md).
+
+## State model
+
+### Local status
+
+- **UNCHANGED** — local and baseline agree.
+- **CHANGED** — local content differs from the baseline.
+- **NEW** — local file is not present remotely.
+- **DELETED** — a previously tracked local file is missing locally while still present remotely.
+
+### Remote status
+
+- **REMOTE NEW** — remote exists, local is missing.
+- **REMOTE CHANGED** — tracked remote content differs from the local/baseline state.
+- **REMOTE DELETED** — local tracked file exists, remote file is missing.
+- **REMOTE UNTRACKED** — remote content exists but is outside the local tracked baseline.
+- **CONFLICT** — local and remote both diverged from the shared baseline.
+
+The system does not silently treat remote-only files as disposable content.
+
+## Protection
+
+Protection is configured per connection.
+
+| Mode | Meaning |
+|---|---|
+| `OFF` | Backward-compatible v1.10.3 core workflow. |
+| `CUSTOM` | Enable selected Protection groups. |
+| `SECURED` | Enable the complete Protection policy. |
+
+Protection groups cover areas such as change detection, content verification, conflict handling, backups, operation safety, destructive-operation protection, accepted state, and reporting.
+
+The default remains `OFF` for backward compatibility.
+
+### Important maturity note
+
+The Protection implementation is present in v1.11.0, but the project intentionally does **not** claim that every Protection policy has been exhaustively validated across real-world cPanel environments. Systematic real-world testing is the next development phase.
+
+See [`docs/PROTECTION-TESTING.md`](docs/PROTECTION-TESTING.md).
+
+## Safety principles
+
+1. **Credentials never belong in Git.**
+2. **Destructive operations are explicit.**
+3. **Conflicts are surfaced rather than silently resolved.**
+4. **Remote-untracked files are not silently deleted.**
+5. **Baselines are updated only for successfully completed operations.**
+6. **Partial failures are reported.**
+7. **Sensitive/system/log/mail paths are user-selectable but should be mapped only deliberately.**
+
+See [`docs/SAFETY.md`](docs/SAFETY.md).
+
+## Development
+
+Requirements:
+
+- Node.js 20+ recommended.
+- Cursor with plugin/MCP support.
+- A disposable/non-production cPanel account for integration testing.
+
+Run validation locally:
+
+```bash
+node --check server/cpanel-mcp.js
+node tests/validate-plugin.js
+```
+
+GitHub Actions runs the validation on Node.js 20 and 22.
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/TEST-MATRIX.md`](docs/TEST-MATRIX.md).
+
+## Contributing
+
+Contributions and Protection testing are welcome.
+
+Start with [`CONTRIBUTING.md`](CONTRIBUTING.md). For security issues, read [`SECURITY.md`](SECURITY.md) and do not publish credentials or sensitive customer information in a public issue.
+
+Useful contribution areas include:
+
+- Protection test scenarios;
+- cPanel compatibility reports;
+- conflict/recovery testing;
+- documentation improvements;
+- cross-platform testing;
+- bug fixes with reproducible test cases.
+
+## Community testing invitation
+
+If you have a non-production cPanel account, you can help validate the new Protection layer.
+
+Please test `OFF`, `CUSTOM`, and `SECURED` where applicable and report reproducible results through GitHub Issues. Sanitized logs and precise reproduction steps are especially valuable.
+
+**Never include API tokens, passwords, cookies, private keys, or customer data.**
+
+## Security
+
+This plugin interacts with hosting accounts and therefore deserves careful security handling. GitHub repository security features, Dependabot configuration, secret protection, and CI are part of the project's maintenance model.
+
+See [`SECURITY.md`](SECURITY.md).
+
+## Project documentation
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — technical architecture
+- [`docs/COMMANDS.md`](docs/COMMANDS.md) — command/MCP overview
+- [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — connections and mappings
+- [`docs/SAFETY.md`](docs/SAFETY.md) — safety model
+- [`docs/TEST-MATRIX.md`](docs/TEST-MATRIX.md) — validation and test status
+- [`docs/PROTECTION-TESTING.md`](docs/PROTECTION-TESTING.md) — Protection testing roadmap
+- [`docs/RELEASE.md`](docs/RELEASE.md) — release process
+- [`docs/MARKETPLACE.md`](docs/MARKETPLACE.md) — Marketplace submission notes
+
+## Roadmap
+
+### v1.11.x
+
+- Real-world Protection testing.
+- Expand automated Protection regression coverage.
+- Improve recovery/backup test coverage.
+- Gather compatibility reports from different cPanel environments.
+
+### Future
+
+- Broader automated integration testing.
+- More granular diagnostics and test tooling.
+- Additional deployment/recovery improvements driven by community testing.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
+
+## Author
+
+**Gabrijel Baban**
+
+Repository: https://github.com/glcvr6/cpanel-hosting-deploy

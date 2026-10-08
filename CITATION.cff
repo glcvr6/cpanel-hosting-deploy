@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use cPanel Hosting Deploy in research, documentation, or a public project, please cite this repository."
+title: "cPanel Hosting Deploy"
+type: software
+version: 1.11.0
+date-released: 2026-10-08
+repository-code: "https://github.com/glcvr6/cpanel-hosting-deploy"
+url: "https://github.com/glcvr6/cpanel-hosting-deploy"
+authors:
+  - family-names: Baban
+    given-names: Gabrijel
+license: MIT
+abstract: "A generic Cursor plugin for safe local-to-cPanel deployment and remote synchronization with configurable Protection modes."
+keywords:
+  - Cursor
+  - cPanel
+  - deployment
+  - synchronization
+  - hosting
+  - MCP

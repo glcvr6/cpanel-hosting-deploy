@@ -1,0 +1,962 @@
+#!/usr/bin/env node
+'use strict';
+
+const fs = require('fs');
+const fsp = fs.promises;
+const path = require('path');
+const os = require('os');
+const crypto = require('crypto');
+const { spawnSync } = require('child_process');
+
+const VERSION = '1.11.0';
+const WORKSPACE = process.env.CURSOR_WORKSPACE || process.cwd();
+const APP_DIR = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'cPanel Hosting Deploy');
+const CONNECTIONS_FILE = path.join(APP_DIR, 'connections.json');
+const DEFAULT_EXCLUDE = ['node_modules', '.git', '.env', 'logs'];
+const DEFAULT_CONNECTION_NAME = 'Default';
+
+// Protection policy engine. OFF preserves the original v1.10.3 core workflow;
+// SECURED enables the complete protection policy; CUSTOM enables selected groups.
+const PROTECTION_GROUPS = {
+  changeDetection: ['localChanges','remoteChanges','conflicts','newDeleted','remoteUntracked'],
+  contentVerification: ['sizeMtime','sha256','deepCheck'],
+  conflictProtection: ['reviewDiff','conflictProtection'],
+  backupProtection: ['backupBeforeDestructive','localBackups','remoteBackups','backupRetention'],
+  operationSafety: ['retry','partialSuccess','resume','locks'],
+  destructiveProtection: ['deleteConfirmation','overwriteConfirmation','forceConfirmation','restoreConfirmation'],
+  acceptedState: ['acceptedDecisions','acceptedAutomatic','acceptedRevalidate'],
+  reporting: ['reports','unknownHandling']
+};
+const PROTECTION_DEFAULTS = Object.fromEntries(Object.values(PROTECTION_GROUPS).flat().map(k=>[k,true]));
+const DEFAULT_SETTINGS = {
+  protectionMode:'OFF',
+  protection:{...PROTECTION_DEFAULTS},
+  largeFileThresholdBytes:3*1024*1024,
+  retryAttempts:3,
+  reportRetention:10,
+  backupRetention:10,
+  autoDeploy:false,
+  verifyAfterSync:false,
+  verifyMethod:'sha256'
+};
+function normalizeProtectionMode(v){ const x=String(v||'OFF').toUpperCase(); return ['SECURED','CUSTOM','OFF'].includes(x)?x:'OFF'; }
+function normalizeSettings(raw){
+  const x={...DEFAULT_SETTINGS,...(raw&&typeof raw==='object'?raw:{})};
+  x.protectionMode=normalizeProtectionMode(x.protectionMode);
+  x.protection={...PROTECTION_DEFAULTS,...(raw&&raw.protection||{})};
+  x.largeFileThresholdBytes=Math.max(1,Number(x.largeFileThresholdBytes)||DEFAULT_SETTINGS.largeFileThresholdBytes);
+  x.retryAttempts=Math.max(1,Math.min(10,Number(x.retryAttempts)||3));
+  x.reportRetention=Math.max(1,Math.min(1000,Number(x.reportRetention)||10));
+  x.backupRetention=Math.max(1,Math.min(1000,Number(x.backupRetention)||10));
+  x.autoDeploy=Boolean(x.autoDeploy); x.verifyAfterSync=Boolean(x.verifyAfterSync);
+  x.verifyMethod=String(x.verifyMethod||'sha256');
+  return x;
+}
+function protectionEnabled(c,key){ const st=normalizeSettings(c.settings); if(st.protectionMode==='OFF') return false; if(st.protectionMode==='SECURED') return true; return st.protection[key]!==false; }
+function protectionGroupEnabled(c,group){ return Object.values(PROTECTION_GROUPS[group]||{}).some(k=>protectionEnabled(c,k)); }
+
+function configuredConnectionName() {
+  const n = String(process.env.CPANEL_CONFIG_CONNECTION_NAME || DEFAULT_CONNECTION_NAME).trim();
+  return n || DEFAULT_CONNECTION_NAME;
+}
+function configuredCredentials() {
+  return {
+    host: String(process.env.CPANEL_CONFIG_HOST || '').trim(),
+    username: String(process.env.CPANEL_CONFIG_USERNAME || '').trim(),
+    remoteRoot: String(process.env.CPANEL_CONFIG_REMOTE_ROOT || '').trim(),
+    apiToken: String(process.env.CPANEL_CONFIG_API_TOKEN || '')
+  };
+}
+
+function send(obj) {
+  process.stdout.write(JSON.stringify(obj) + '\n');
+}
+function result(id, value) { send({jsonrpc:'2.0', id, result:value}); }
+function error(id, code, message, data) { send({jsonrpc:'2.0', id, error:{code, message, ...(data?{data}: {})}}); }
+function log(msg) { process.stderr.write(`[cPanel Hosting Deploy] ${msg}\n`); }
+
+function readJsonLine(line) {
+  try { return JSON.parse(line); } catch (_) { return null; }
+}
+
+async function ensureStore() {
+  await fsp.mkdir(APP_DIR, {recursive:true});
+  try { await fsp.access(CONNECTIONS_FILE); }
+  catch (_) { await fsp.writeFile(CONNECTIONS_FILE, JSON.stringify({version:1, connections:[]}, null, 2), 'utf8'); }
+}
+async function loadStore() {
+  await ensureStore();
+  const raw = await fsp.readFile(CONNECTIONS_FILE, 'utf8');
+  return JSON.parse(raw);
+}
+async function saveStore(store) {
+  await ensureStore();
+  const tmp = CONNECTIONS_FILE + '.tmp';
+  await fsp.writeFile(tmp, JSON.stringify(store, null, 2), 'utf8');
+  await fsp.rename(tmp, CONNECTIONS_FILE);
+}
+
+function protectToken(token) {
+  if (process.platform !== 'win32') throw new Error('This v1 secure credential store requires Windows DPAPI.');
+  const ps = [
+    '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',
+    "$s=[Console]::In.ReadToEnd(); $ss=ConvertTo-SecureString $s -AsPlainText -Force; ConvertFrom-SecureString $ss"
+  ];
+  const r = spawnSync('powershell.exe', ps, {input: String(token), encoding:'utf8', windowsHide:true});
+  if (r.status !== 0) throw new Error(`Windows DPAPI encryption failed: ${r.stderr || r.stdout}`);
+  return String(r.stdout).trim();
+}
+function revealToken(cipher) {
+  if (process.platform !== 'win32') throw new Error('This v1 secure credential store requires Windows DPAPI.');
+  const ps = [
+    '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',
+    "$s=[Console]::In.ReadToEnd().Trim(); $ss=ConvertTo-SecureString $s; $b=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss); try {[Runtime.InteropServices.Marshal]::PtrToStringBSTR($b)} finally {[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b)}"
+  ];
+  const r = spawnSync('powershell.exe', ps, {input: String(cipher), encoding:'utf8', windowsHide:true});
+  if (r.status !== 0) throw new Error(`Windows DPAPI decryption failed: ${r.stderr || r.stdout}`);
+  return String(r.stdout).trim();
+}
+
+function normalizeRemote(p) {
+  let x = String(p || '/').replaceAll('\\','/');
+  if (!x.startsWith('/')) x = '/' + x;
+  x = x.replace(/\/+/g,'/');
+  if (x.length > 1) x = x.replace(/\/+$/,'');
+  return x;
+}
+function safeName(s) { return String(s || '').trim(); }
+function normalizeLocalPath(p){
+  let x=String(p||'').replaceAll('\\','/').replace(/^\.\//,'').replace(/^\/+|\/+$/g,'');
+  if(!x || x==='.') throw new Error('Local folder mapping cannot be empty.');
+  if(x==='..' || x.startsWith('../') || x.includes('/../')) throw new Error('Local folder mapping cannot escape the workspace.');
+  return x;
+}
+function normalizeRemoteMapping(remoteRoot,p){
+  const raw=String(p||'').trim();
+  if(!raw) throw new Error('Remote folder mapping cannot be empty.');
+  return normalizeRemote(raw.startsWith('/') ? raw : `${remoteRoot}/${raw}`);
+}
+function normalizeMappings(remoteRoot, mappings){
+  if(!Array.isArray(mappings)) return [];
+  return mappings.map(m=>{
+    if(typeof m==='string') {
+      const local=normalizeLocalPath(m);
+      return {local,remote:normalizeRemoteMapping(remoteRoot,local),enabled:true};
+    }
+    const local=normalizeLocalPath(m.local||m.localPath);
+    const remote=normalizeRemoteMapping(remoteRoot,m.remote||m.remotePath||local);
+    return {local,remote,enabled:m.enabled!==false};
+  });
+}
+function sanitizeConnection(c) {
+  return {name:c.name, host:c.host, username:c.username, remoteRoot:c.remoteRoot, mappings:c.mappings||[], exclude:c.exclude, settings:normalizeSettings(c.settings)};
+}
+function validateConnectionInput(a) {
+  const name=safeName(a.name), host=safeName(a.host), username=safeName(a.username), remoteRoot=normalizeRemote(a.remoteRoot);
+  if (!name) throw new Error('Connection name is required.');
+  if (!/^https?:\/\//i.test(host)) throw new Error('Host must start with http:// or https://.');
+  if (!username) throw new Error('cPanel username is required.');
+  if (!a.apiToken) throw new Error('cPanel API token is required.');
+  if (remoteRoot === '/') throw new Error('Remote root must be a cPanel home directory, not /.');
+  const mappings = normalizeMappings(remoteRoot, a.mappings ?? a.folders ?? []);
+  const exclude = Array.isArray(a.exclude) ? a.exclude.map(String).filter(Boolean) : DEFAULT_EXCLUDE;
+  return {name,host:host.replace(/\/+$/,''),username,remoteRoot,mappings,exclude,settings:normalizeSettings(a.settings),tokenEncrypted:protectToken(a.apiToken)};
+}
+
+async function getConnection(name) {
+  const store=await loadStore();
+  const c=store.connections.find(x=>x.name.toLowerCase()===String(name).toLowerCase());
+  if (!c) throw new Error(`Connection not found: ${name}`);
+  return c;
+}
+
+function authHeaders(c) {
+  const token=revealToken(c.tokenEncrypted);
+  return {'Authorization':`cpanel ${c.username}:${token}`};
+}
+async function apiGet(c,module,fn,params={}) {
+  const u=new URL(`${c.host}/execute/${module}/${fn}`);
+  for (const [k,v] of Object.entries(params)) u.searchParams.set(k,String(v));
+  const r=await fetch(u,{headers:authHeaders(c)});
+  const text=await r.text();
+  let j; try{j=JSON.parse(text);}catch(_){throw new Error(`cPanel returned non-JSON response (${r.status}).`);}
+  if (!r.ok || j.status !== 1) throw new Error((j.errors||[]).join('; ') || `cPanel API HTTP ${r.status}`);
+  return j;
+}
+async function apiUpload(c,remoteDir,localFile) {
+  const data=await fsp.readFile(localFile);
+  const form=new FormData();
+  form.append('dir',remoteDir);
+  form.append('overwrite','1');
+  form.append('file-1',new Blob([data]),path.basename(localFile));
+  const token=revealToken(c.tokenEncrypted);
+  const r=await fetch(`${c.host}/execute/Fileman/upload_files`,{method:'POST',headers:{'Authorization':`cpanel ${c.username}:${token}`},body:form});
+  const text=await r.text();
+  let j; try{j=JSON.parse(text);}catch(_){throw new Error(`Upload returned non-JSON response (${r.status}).`);}
+  if (!r.ok || j.status !== 1) throw new Error((j.errors||[]).join('; ') || `Upload failed with HTTP ${r.status}`);
+  if (j.data && Number(j.data.failed||0)>0) throw new Error(`cPanel reported ${j.data.failed} failed upload(s).`);
+  return j;
+}
+
+function sha256(file){
+  const h=crypto.createHash('sha256'); h.update(fs.readFileSync(file)); return h.digest('hex');
+}
+function relativePosix(full){
+  const rel=path.relative(WORKSPACE,full).replaceAll('\\','/');
+  if (rel.startsWith('../') || rel==='..' || path.isAbsolute(rel)) throw new Error(`Path outside workspace: ${full}`);
+  return rel;
+}
+function excluded(rel, list){
+  const parts=rel.replaceAll('\\','/').split('/');
+  if (list.some(x=>parts.some(p=>p.toLowerCase()===String(x).replaceAll('\\','/').replace(/^\/+|\/+$/g,'').toLowerCase()))) return true;
+  return path.extname(rel).toLowerCase()==='.zip';
+}
+function mappingForLocal(c,rel){
+  const normalized=rel.replaceAll('\\','/');
+  return (c.mappings||[]).find(m=>m.enabled!==false && (normalized===m.local || normalized.startsWith(m.local+'/')));
+}
+function remoteFromRel(c,rel){
+  const m=mappingForLocal(c,rel);
+  if(!m) throw new Error(`Local path is not inside an enabled deployment mapping: ${rel}`);
+  const tail=rel.replaceAll('\\','/').slice(m.local.length).replace(/^\/+/, '');
+  return normalizeRemote(tail ? `${m.remote}/${tail}` : m.remote);
+}
+function allowedRemote(c,p){
+  const x=normalizeRemote(p);
+  return (c.mappings||[]).some(m=>m.enabled!==false && (x===normalizeRemote(m.remote) || x.startsWith(normalizeRemote(m.remote)+'/')));
+}
+function manifestPath(){return path.join(WORKSPACE,'.hosting','manifest.json');}
+async function loadManifest(){
+  try { const x=JSON.parse(await fsp.readFile(manifestPath(),'utf8')); return x && typeof x==='object'?x:{}; }
+  catch(_){ return {}; }
+}
+async function saveManifest(m){ const d=path.dirname(manifestPath()); await fsp.mkdir(d,{recursive:true}); await fsp.writeFile(manifestPath(),JSON.stringify(m,null,2),'utf8'); }
+
+
+// Remote file inventory used by local status/deploy and remote status.
+// IMPORTANT: this only lists the enabled mapping roots; it never modifies hosting.
+async function listRemoteFiles(c) {
+  const files = new Map();
+  const visitedDirs = new Set();
+
+  async function walk(dir) {
+    dir = normalizeRemote(dir);
+    if (visitedDirs.has(dir)) return;
+    visitedDirs.add(dir);
+
+    const j = await apiGet(c, 'Fileman', 'list_files', {dir});
+    for (const item of (j.data || [])) {
+      const nm = String(item.file || item.name || '');
+      if (!nm) continue;
+      const rp = normalizeRemote(`${dir}/${nm}`);
+      const type = String(item.type || '').toLowerCase();
+
+      if (type === 'dir' || type === 'directory') {
+        if (allowedRemote(c, rp)) await walk(rp);
+      } else if (allowedRemote(c, rp)) {
+        files.set(rp, {
+          path: rp,
+          size: Number(item.size || 0),
+          mtime: item.mtime ?? item.modified ?? item.modification_time ?? null
+        });
+      }
+    }
+  }
+
+  for (const m of (c.mappings || [])) {
+    if (m.enabled === false) continue;
+    await walk(m.remote);
+  }
+
+  return files;
+}
+
+async function remoteSha256(c, remotePath) {
+  const u = new URL(`${c.host}/download`);
+  u.searchParams.set('file', remotePath);
+  const r = await fetch(u, {headers: authHeaders(c), signal: AbortSignal.timeout(120000)});
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`Remote download failed HTTP ${r.status} for ${remotePath}`);
+  const buf = Buffer.from(await r.arrayBuffer());
+  return crypto.createHash('sha256').update(buf).digest('hex');
+}
+
+async function remoteHashes(c, remotePaths, concurrency = 6) {
+  const out = new Map();
+  let index = 0;
+
+  async function worker() {
+    while (true) {
+      const i = index++;
+      if (i >= remotePaths.length) return;
+      const rp = remotePaths[i];
+      try {
+        out.set(rp, await remoteSha256(c, rp));
+      } catch (e) {
+        // A remote file that cannot be downloaded must not abort the whole
+        // local status operation. It remains un-baselined and is reported by
+        // the normal plan as CHANGED rather than silently treated as identical.
+        out.set(rp, null);
+        log(`Remote baseline hash failed for ${rp}: ${e.message}`);
+      }
+    }
+  }
+
+  const count = Math.min(concurrency, remotePaths.length);
+  await Promise.all(Array.from({length: count}, () => worker()));
+  return out;
+}
+
+async function downloadOne(c, remotePath, rel, overwrite = true) {
+  const u = new URL(`${c.host}/download`);
+  u.searchParams.set('file', remotePath);
+  const r = await fetch(u, {headers: authHeaders(c), signal: AbortSignal.timeout(120000)});
+  if (!r.ok) throw new Error(`Download failed HTTP ${r.status} for ${remotePath}`);
+
+  const b = Buffer.from(await r.arrayBuffer());
+  const local = path.join(WORKSPACE, ...rel.split('/'));
+  await fsp.mkdir(path.dirname(local), {recursive: true});
+
+  if (!overwrite) {
+    try {
+      await fsp.access(local);
+      throw new Error(`Local file already exists: ${rel}`);
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+    }
+  }
+
+  await fsp.writeFile(local, b);
+  return sha256(local);
+}
+
+function remoteMetaPath(){return path.join(WORKSPACE,'.hosting','remote-meta.json');}
+async function loadRemoteMeta(){
+  try { const x=JSON.parse(await fsp.readFile(remoteMetaPath(),'utf8')); return x && typeof x==='object'?x:{}; }
+  catch(_){ return {}; }
+}
+async function saveRemoteMeta(m){ const d=path.dirname(remoteMetaPath()); await fsp.mkdir(d,{recursive:true}); await fsp.writeFile(remoteMetaPath(),JSON.stringify(m,null,2),'utf8'); }
+function remoteMetaEqual(a,b){
+  if(!a || !b) return false;
+  const as=Number(a.size ?? -1), bs=Number(b.size ?? -1);
+  const am=a.mtime == null ? null : String(a.mtime);
+  const bm=b.mtime == null ? null : String(b.mtime);
+  return as===bs && am===bm;
+}
+function relFromRemote(c,rp){
+  const x=normalizeRemote(rp);
+  const m=(c.mappings||[]).find(m=>m.enabled!==false && (x===normalizeRemote(m.remote) || x.startsWith(normalizeRemote(m.remote)+'/')));
+  if(!m) return null;
+  const tail=x.slice(normalizeRemote(m.remote).length).replace(/^\/+/, '');
+  return path.posix.join(m.local,tail);
+}
+function localPathForRel(rel){return path.join(WORKSPACE,...String(rel).split('/'));}
+
+async function remotePendingPath(){ return path.join(WORKSPACE,'.hosting','remote-pending.json'); }
+async function loadRemotePending(){
+  try { const x=JSON.parse(await fsp.readFile(await remotePendingPath(),'utf8')); return x && typeof x==='object'?x:null; }
+  catch(_){ return null; }
+}
+async function saveRemotePending(x){ const d=path.dirname(await remotePendingPath()); await fsp.mkdir(d,{recursive:true}); await fsp.writeFile(await remotePendingPath(),JSON.stringify(x,null,2),'utf8'); }
+async function clearRemotePending(){ try{await fsp.unlink(await remotePendingPath());}catch(_){} }
+
+
+function protectionStatePath(){return path.join(WORKSPACE,'.hosting','protection-state.json');}
+async function loadProtectionState(){try{const x=JSON.parse(await fsp.readFile(protectionStatePath(),'utf8'));return x&&typeof x==='object'?x:{};}catch(_){return {};}}
+async function saveProtectionState(x){const d=path.dirname(protectionStatePath());await fsp.mkdir(d,{recursive:true});await fsp.writeFile(protectionStatePath(),JSON.stringify(x,null,2),'utf8');}
+function backupRoot(){return path.join(WORKSPACE,'sync-backup');}
+function remoteBackupRoot(){return '.cpanel-sync-backup';}
+function reportRoot(){return path.join(WORKSPACE,'sync-reports');}
+function isIgnoredProtectionPath(rel){const p=String(rel).replaceAll('\\','/');return p.includes('.remote-deleted.backup')||p.startsWith('sync-backup/')||p.includes('/sync-backup/')||p.startsWith('sync-reports/')||p.includes('/sync-reports/');}
+async function copyLocalBackup(rel,suffix){
+  const src=localPathForRel(rel); if(!fs.existsSync(src)) return null;
+  const dst=path.join(backupRoot(),...String(rel).split('/'))+`.${suffix}.backup`;
+  await fsp.mkdir(path.dirname(dst),{recursive:true});
+  let target=dst, n=1; while(fs.existsSync(target)){target=dst.replace(/\.backup$/,`.${n++}.backup`);}
+  await fsp.copyFile(src,target); return target;
+}
+async function remoteBackup(c,remotePath,rel,suffix){
+  const tmp=path.join(os.tmpdir(),`cpanel-backup-${crypto.randomUUID()}`); await fsp.mkdir(tmp,{recursive:true});
+  const localTmp=path.join(tmp,path.basename(remotePath));
+  try{ const u=new URL(`${c.host}/download`);u.searchParams.set('file',remotePath);const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});if(!r.ok)throw new Error(`Remote backup download failed HTTP ${r.status}`);await fsp.writeFile(localTmp,Buffer.from(await r.arrayBuffer()));await ensureRemoteDir(c,`${remoteBackupRoot()}/${path.posix.dirname(rel)}`);await apiUpload(c,`${remoteBackupRoot()}/${path.posix.dirname(rel)}`,localTmp);return normalizeRemote(`${remoteBackupRoot()}/${rel}.${suffix}.backup`);}finally{await fsp.rm(tmp,{recursive:true,force:true}).catch(()=>{});}}
+async function requireKeyword(action,provided,enabled=true){if(!enabled)return; if(String(provided||'').toUpperCase()!==action)throw new Error(`This operation requires confirmation keyword ${action}.`);}
+async function verifyRemoteContent(c,rp,localFile){const rh=await remoteSha256(c,rp);if(rh===null)return {ok:false,missing:true};const lh=sha256(localFile);return {ok:rh===lh,localHash:lh,remoteHash:rh};}
+async function retryOperation(fn,attempts){let last;for(let i=0;i<attempts;i++){try{return await fn(i+1);}catch(e){last=e;if(i===attempts-1)throw e;}}throw last;}
+async function writeReport(c,title,data){if(!protectionEnabled(c,'reports'))return null;const dir=reportRoot();await fsp.mkdir(dir,{recursive:true});const stamp=new Date().toISOString().replace(/[:.]/g,'-');let p=path.join(dir,`${stamp}-${title}.md`),n=1;while(fs.existsSync(p))p=path.join(dir,`${stamp}-${title}.${n++}.md`);await fsp.writeFile(p,`# ${title}\n\nConnection: ${c.name}\nTime: ${new Date().toISOString()}\n\n\`\`\`json\n${JSON.stringify(data,null,2)}\n\`\`\`\n`,'utf8');return p;}
+async function cleanupRetention(dir,limit){try{await fsp.mkdir(dir,{recursive:true});const files=(await fsp.readdir(dir,{withFileTypes:true})).filter(x=>x.isFile()).map(x=>x.name).sort().reverse();for(const f of files.slice(limit))await fsp.unlink(path.join(dir,f));}catch(e){log(`Retention cleanup failed: ${e.message}`);}}
+function acceptedStateKey(c,rel){return `${c.name}::${rel}`;}
+async function getAccepted(c,rel){const st=await loadProtectionState();return st.accepted?.[acceptedStateKey(c,rel)]||null;}
+async function setAccepted(c,rel,value){const st=await loadProtectionState();st.accepted=st.accepted||{};const k=acceptedStateKey(c,rel);if(value)st.accepted[k]=value;else delete st.accepted[k];await saveProtectionState(st);}
+async function getSettings(c){return normalizeSettings(c.settings);}
+async function updateSettings(c,patch){c.settings=normalizeSettings({...normalizeSettings(c.settings),...patch,protection:{...normalizeSettings(c.settings).protection,...(patch.protection||{})}});const store=await loadStore();const idx=store.connections.findIndex(x=>x.name.toLowerCase()===c.name.toLowerCase());if(idx<0)throw new Error(`Connection not found: ${c.name}`);store.connections[idx].settings=c.settings;await saveStore(store);return c.settings;}
+function protectionWarning(c){const st=normalizeSettings(c.settings);if(st.protectionMode==='OFF')return 'Protection is OFF: only the original v1.10.3 core workflow is active.';return st.protectionMode==='SECURED'?'Protection SECURED: all protection rules are active.':'Protection CUSTOM: only selected protection rules are active.';}
+async function buildRemoteStatus(c){
+  const manifest=await loadManifest();
+  const previous=await loadRemoteMeta();
+  const hadBaseline=Object.keys(previous).length>0;
+  const remoteFiles=await listRemoteFiles(c);
+  const current={};
+  for(const [rp,info] of remoteFiles) current[rp]={size:Number(info.size||0),mtime:info.mtime==null?null:String(info.mtime)};
+
+  const remoteNew=[], remoteUntracked=[], remoteChanged=[], remoteDeleted=[], remoteUnchanged=[], conflicts=[];
+  for(const [rp,info] of remoteFiles){
+    const rel=relFromRemote(c,rp);
+    if(!rel) continue;
+    if(!Object.prototype.hasOwnProperty.call(manifest,rel)){
+      const lp=localPathForRel(rel);
+      let localExists=false; try{localExists=(await fsp.stat(lp)).isFile();}catch(_){}
+      if(localExists){
+        conflicts.push({path:rel,remote:rp,reason:'Remote file is not tracked, but a local file already exists at the mapped path.'});
+      } else if(!hadBaseline || Object.prototype.hasOwnProperty.call(previous,rp)) {
+        remoteUntracked.push({path:rel,remote:rp,size:info.size,mtime:info.mtime});
+      } else {
+        remoteNew.push({path:rel,remote:rp,size:info.size,mtime:info.mtime});
+      }
+      continue;
+    }
+    const old=previous[rp];
+    if(!old){
+      remoteUnchanged.push({path:rel,remote:rp,size:info.size,mtime:info.mtime,baseline:'established'});
+    } else if(remoteMetaEqual(old,info)) {
+      remoteUnchanged.push({path:rel,remote:rp,size:info.size,mtime:info.mtime});
+    } else {
+      let localChanged=false;
+      try{localChanged=sha256(localPathForRel(rel))!==manifest[rel];}catch(_){}
+      if(localChanged) conflicts.push({path:rel,remote:rp,reason:'Both local and remote may have changed since the last remote baseline. Remote sync will not overwrite the local file automatically.'});
+      else remoteChanged.push({path:rel,remote:rp,size:info.size,mtime:info.mtime});
+    }
+  }
+  for(const rel of Object.keys(manifest)){
+    if(excluded(rel,c.exclude)) continue;
+    const rp=remoteFromRel(c,rel);
+    if(!remoteFiles.has(rp)) remoteDeleted.push({path:rel,remote:rp});
+  }
+
+  await saveRemoteMeta(current);
+  const pending={createdAt:new Date().toISOString(),connection:c.name,remoteNew,remoteUntracked,remoteChanged,remoteDeleted,conflicts};
+  await saveRemotePending(pending);
+  return {
+    connection:c.name,
+    baselineInitialized:!hadBaseline,
+    summary:{remoteNew:remoteNew.length,remoteUntracked:remoteUntracked.length,remoteChanged:remoteChanged.length,remoteDeleted:remoteDeleted.length,remoteUnchanged:remoteUnchanged.length,conflicts:conflicts.length},
+    remoteNew,remoteUntracked,remoteChanged,remoteDeleted,remoteUnchanged,conflicts,
+    message:(!hadBaseline && (remoteNew.length||remoteUntracked.length))
+      ? 'Initial remote baseline established. Files that were not previously tracked are shown as REMOTE UNTRACKED; files appearing after this baseline will be REMOTE NEW.'
+      : (remoteNew.length||remoteChanged.length||remoteDeleted.length||conflicts.length)
+        ? 'Remote changes were detected. Review them before syncing to the local workspace.'
+        : 'No remote changes detected.'
+  };
+}
+
+async function buildRemoteStatusProtected(c){
+  const manifest=await loadManifest();
+  const previous=await loadRemoteMeta();
+  const hadBaseline=Object.keys(previous).length>0;
+  const remoteFiles=await listRemoteFiles(c);
+  const current={};
+  for(const [rp,info] of remoteFiles) current[rp]={size:Number(info.size||0),mtime:info.mtime==null?null:String(info.mtime)};
+
+  const remoteNew=[], remoteUntracked=[], remoteChanged=[], remoteDeleted=[], remoteUnchanged=[], conflicts=[];
+  for(const [rp,info] of remoteFiles){
+    const rel=relFromRemote(c,rp);
+    if(!rel) continue;
+    if(!Object.prototype.hasOwnProperty.call(manifest,rel)){
+      const lp=localPathForRel(rel);
+      let localExists=false; try{localExists=(await fsp.stat(lp)).isFile();}catch(_){}
+      if(localExists){
+        conflicts.push({path:rel,remote:rp,reason:'Remote file is not tracked, but a local file already exists at the mapped path.'});
+      } else if(!hadBaseline || Object.prototype.hasOwnProperty.call(previous,rp)) {
+        remoteUntracked.push({path:rel,remote:rp,size:info.size,mtime:info.mtime});
+      } else {
+        remoteNew.push({path:rel,remote:rp,size:info.size,mtime:info.mtime});
+      }
+      continue;
+    }
+    const old=previous[rp];
+    if(!old){
+      remoteUnchanged.push({path:rel,remote:rp,size:info.size,mtime:info.mtime,baseline:'established'});
+    } else if(remoteMetaEqual(old,info)) {
+      remoteUnchanged.push({path:rel,remote:rp,size:info.size,mtime:info.mtime});
+    } else {
+      let localChanged=false;
+      try{localChanged=sha256(localPathForRel(rel))!==manifest[rel];}catch(_){}
+      if(localChanged) conflicts.push({path:rel,remote:rp,reason:'Both local and remote may have changed since the last remote baseline. Remote sync will not overwrite the local file automatically.'});
+      else remoteChanged.push({path:rel,remote:rp,size:info.size,mtime:info.mtime});
+    }
+  }
+  for(const rel of Object.keys(manifest)){
+    if(excluded(rel,c.exclude)) continue;
+    const rp=remoteFromRel(c,rel);
+    if(!remoteFiles.has(rp)) remoteDeleted.push({path:rel,remote:rp});
+  }
+
+  // A read-only status check never advances the remote baseline when differences exist.
+  // If every tracked pair is confirmed identical, the current state is safe to accept.
+  const hasDifferences = remoteNew.length||remoteChanged.length||remoteDeleted.length||conflicts.length;
+  if (!hasDifferences || (!remoteChanged.length && !remoteDeleted.length && !conflicts.length)) await saveRemoteMeta(current);
+  const pending={createdAt:new Date().toISOString(),connection:c.name,remoteNew,remoteUntracked,remoteChanged,remoteDeleted,conflicts};
+  await saveRemotePending(pending);
+  return {
+    connection:c.name,
+    baselineInitialized:!hadBaseline,
+    summary:{remoteNew:remoteNew.length,remoteUntracked:remoteUntracked.length,remoteChanged:remoteChanged.length,remoteDeleted:remoteDeleted.length,remoteUnchanged:remoteUnchanged.length,conflicts:conflicts.length},
+    remoteNew,remoteUntracked,remoteChanged,remoteDeleted,remoteUnchanged,conflicts,
+    message:(!hadBaseline && (remoteNew.length||remoteUntracked.length))
+      ? 'Initial remote baseline established. Files that were not previously tracked are shown as REMOTE UNTRACKED; files appearing after this baseline will be REMOTE NEW.'
+      : (remoteNew.length||remoteChanged.length||remoteDeleted.length||conflicts.length)
+        ? 'Remote changes were detected. Review them before syncing to the local workspace.'
+        : 'No remote changes detected.'
+  };
+}
+
+async function remoteSync(c, actions, confirm){
+  // Always refresh remote state immediately before a sync decision.
+  // Never rely on a stale pending snapshot because the remote may have
+  // changed after the last /cpanel-remote-status call.
+  const pending=await buildRemoteStatus(c);
+  const candidates=[...pending.remoteNew.map(x=>({...x,status:'REMOTE NEW'})),...pending.remoteChanged.map(x=>({...x,status:'REMOTE CHANGED'})),...pending.remoteDeleted.map(x=>({...x,status:'REMOTE DELETED'}))];
+  const allowed=new Map(Array.isArray(actions)?actions.map(x=>[String(x.path),x]):[]);
+  if(!confirm) return {requiresConfirmation:true,connection:c.name,summary:{remoteNew:pending.remoteNew.length,remoteUntracked:pending.remoteUntracked.length,remoteChanged:pending.remoteChanged.length,remoteDeleted:pending.remoteDeleted.length,conflicts:pending.conflicts.length},files:candidates,remoteUntracked:pending.remoteUntracked,conflicts:pending.conflicts,message:candidates.length?'No local files were changed. Review each remote change and call remote sync again with explicit per-file actions (sync or keep) and confirm=true.':'No remote changes need syncing.'};
+  const synced=[],kept=[],failed=[];
+  for(const item of candidates){
+    const action=allowed.get(item.path);
+    if(!action || action.action==='keep'){kept.push(item.path);continue;}
+    if(action.action!=='sync'){failed.push({path:item.path,error:'Action must be sync or keep.'});continue;}
+    try{
+      const local=localPathForRel(item.path);
+      if(item.status==='REMOTE DELETED'){
+        if(action.confirmation!=='DELETE_LOCAL') throw new Error('Syncing REMOTE DELETED requires confirmation value DELETE_LOCAL.');
+        await fsp.rm(local,{force:true});
+        const manifest=await loadManifest(); delete manifest[item.path]; await saveManifest(manifest);
+      } else {
+        if(item.status==='REMOTE CHANGED' && action.confirmation!=='OVERWRITE_LOCAL') throw new Error('Syncing REMOTE CHANGED requires confirmation value OVERWRITE_LOCAL.');
+        const hash=await downloadOne(c,item.remote,item.path,true);
+        const manifest=await loadManifest(); manifest[item.path]=hash; await saveManifest(manifest);
+      }
+      synced.push(item.path);
+    }catch(e){failed.push({path:item.path,error:e.message});}
+  }
+  await saveRemoteMeta(await listRemoteFiles(c).then(m=>Object.fromEntries([...m].map(([rp,i])=>[rp,{size:Number(i.size||0),mtime:i.mtime==null?null:String(i.mtime)}]))));
+  await clearRemotePending();
+  return {requiresConfirmation:false,connection:c.name,synced,kept,failed,conflicts:pending.conflicts,summary:{remoteNew:pending.remoteNew.length,remoteUntracked:pending.remoteUntracked.length,remoteChanged:pending.remoteChanged.length,remoteDeleted:pending.remoteDeleted.length,conflicts:pending.conflicts.length},message:`Synced ${synced.length} remote change(s); kept ${kept.length}; failed ${failed.length}.`};
+}
+
+async function buildPlan(c){
+  const manifest=await loadManifest();
+  const out=[];
+
+  // First-run safety: if the local manifest has no hash for a file, compare the
+  // local bytes with the actual remote bytes before calling it NEW. This prevents
+  // an existing production site from being re-uploaded just because the local
+  // workspace has never deployed through this plugin before.
+  let remoteFiles = null;
+  const needRemoteBaseline = (c.mappings||[]).some(m=>m.enabled!==false) &&
+    (()=>{
+      for (const m of (c.mappings||[])) {
+        if (m.enabled===false) continue;
+        const root=path.join(WORKSPACE,...m.local.split('/'));
+        // If the local mapping exists and contains any file missing from the manifest,
+        // a remote baseline may be required.
+        // We intentionally do not inspect every file here; buildPlan below will decide.
+        try { fs.accessSync(root); } catch(_) { continue; }
+        return true;
+      }
+      return false;
+    })();
+  if (needRemoteBaseline) {
+    remoteFiles = await listRemoteFiles(c);
+  }
+
+  let manifestChanged = false;
+  // Compute remote hashes once per missing-manifest file, in a small bounded
+  // parallel pool. This is the safe first-run baseline: existing remote files
+  // that are byte-identical to local files become UNCHANGED, not NEW.
+  let baselineHashes = new Map();
+  if (remoteFiles && remoteFiles.size) {
+    const candidatePaths = [];
+    for (const m of (c.mappings || [])) {
+      if (m.enabled === false) continue;
+      const root = path.join(WORKSPACE, ...m.local.split('/'));
+      try { fs.accessSync(root); } catch (_) { continue; }
+      async function collect(dir) {
+        for (const ent of await fsp.readdir(dir, {withFileTypes:true})) {
+          const full = path.join(dir, ent.name);
+          const rel = relativePosix(full);
+          if (excluded(rel, c.exclude)) continue;
+          if (ent.isDirectory()) { await collect(full); continue; }
+          if (Object.prototype.hasOwnProperty.call(manifest, rel)) continue;
+          const rp = remoteFromRel(c, rel);
+          if (remoteFiles.has(rp)) candidatePaths.push(rp);
+        }
+      }
+      await collect(root);
+    }
+    baselineHashes = await remoteHashes(c, [...new Set(candidatePaths)]);
+  }
+
+  for(const m of (c.mappings||[])){
+    if(m.enabled===false) continue;
+    const root=path.join(WORKSPACE,...m.local.split('/'));
+    try{await fsp.access(root);}catch(_){continue;}
+    async function walk(dir){
+      for(const ent of await fsp.readdir(dir,{withFileTypes:true})){
+        const full=path.join(dir,ent.name); const rel=relativePosix(full);
+        if(excluded(rel,c.exclude)) continue;
+        if(ent.isDirectory()){await walk(full);continue;}
+        const hash=sha256(full);
+        let status;
+        if(Object.prototype.hasOwnProperty.call(manifest,rel)) {
+          status=manifest[rel]!==hash?'CHANGED':'UNCHANGED';
+        } else {
+          const remote=remoteFromRel(c,rel);
+          const remoteInfo=remoteFiles ? remoteFiles.get(remote) : null;
+          if(!remoteInfo) {
+            status='NEW';
+          } else {
+            const remoteHash=baselineHashes.get(remote);
+            if(remoteHash && remoteHash===hash) {
+              status='UNCHANGED';
+              // Establish the baseline only after a verified byte-for-byte match.
+              manifest[rel]=hash;
+              manifestChanged=true;
+            } else {
+              status='CHANGED';
+            }
+          }
+        }
+        out.push({relativePath:rel,localPath:full,hash,status,size:ent.size,mapping:{local:m.local,remote:m.remote}});
+      }
+    }
+    await walk(root);
+  }
+  // Detect files that were previously tracked locally but are now missing.
+  // A missing local file is NEVER treated as an automatic remote deletion.
+  // It becomes DELETED and is resolved explicitly by the user.
+  const seenLocal = new Set(out.map(x=>x.relativePath));
+  const remoteFilesForDeleted = remoteFiles || await listRemoteFiles(c);
+  for (const rel of Object.keys(manifest)) {
+    if (seenLocal.has(rel)) continue;
+    if (excluded(rel, c.exclude)) continue;
+    let mapped = false;
+    try { mapped = Boolean(mappingForLocal(c, rel)); } catch (_) { mapped = false; }
+    if (!mapped) continue;
+    const remote = remoteFromRel(c, rel);
+    if (remoteFilesForDeleted.has(remote)) {
+      out.push({relativePath:rel, localPath:path.join(WORKSPACE,...rel.split('/')), hash:null, status:'DELETED', size:0, mapping:mappingForLocal(c, rel)});
+    }
+  }
+  if(manifestChanged) await saveManifest(manifest);
+  return out;
+}
+
+async function ensureRemoteDir(c,dir){
+  dir=normalizeRemote(dir); if(dir==='/') return;
+  try{await apiGet(c,'Fileman','list_files',{dir});return;}catch(_){ }
+  const parent=path.posix.dirname(dir); const name=path.posix.basename(dir); await ensureRemoteDir(c,parent); await apiGet(c,'Fileman','mkdir',{path:parent==='.'?'/':parent,name});
+}
+
+
+async function workspaceState(c){
+  const entries = [];
+  let totalFiles = 0;
+  let totalDirs = 0;
+  let hostingDirCount = 0;
+  for (const ent of await fsp.readdir(WORKSPACE, {withFileTypes:true})) {
+    if (ent.name === '.hosting') continue;
+    if (excluded(ent.name, c.exclude)) continue;
+    entries.push(ent.name);
+    if (ent.isDirectory()) totalDirs++; else totalFiles++;
+  }
+  const mappings = (c.mappings || []).filter(m=>m.enabled!==false);
+  const mappingRoots = mappings.map(m=>({local:m.local, remote:m.remote, exists:fs.existsSync(path.join(WORKSPACE,...m.local.split('/')))}));
+  const manifest = await loadManifest();
+  const manifestEntries = Object.keys(manifest).length;
+  const hasLocalContent = entries.length > 0;
+  const mappedLocalExists = mappingRoots.some(x=>x.exists);
+  return {
+    workspace: WORKSPACE,
+    state: !hasLocalContent ? 'EMPTY' : (mappings.length ? 'EXISTING_OR_MAPPED' : 'EXISTING_UNMAPPED'),
+    hasLocalContent,
+    totalFiles,
+    totalDirs,
+    entries: entries.slice(0,100),
+    existingMappings: mappingRoots,
+    mappingCount: mappings.length,
+    manifestEntries,
+    recommendedQuestion: 'Kako je trenutno stanje lokalnog projekta? 1) Nemam lokalne fajlove / imam prazan lokalni folder i želim preuzeti odabrane foldere sa hostinga. 2) Već imam lokalni folder sa projektom i želim ga mapirati na hosting. 3) Želim promijeniti postojeću konfiguraciju.'
+  };
+}
+
+async function initializeWorkspaceFromHost(c, mappings, confirm){
+  if(!confirm) return {
+    requiresConfirmation:true,
+    message:'No files were downloaded. Review the selected remote-to-local mappings, then call initialize again with confirm=true.'
+  };
+  if(!Array.isArray(mappings) || !mappings.length) throw new Error('At least one remote-to-local mapping is required.');
+
+  const normalized = mappings.map(m=>{
+    const local=normalizeLocalPath(m.local||m.localPath);
+    const remote=normalizeRemoteMapping(c.remoteRoot,m.remote||m.remotePath);
+    return {local,remote,enabled:m.enabled!==false};
+  }).filter(m=>m.enabled);
+  if(!normalized.length) throw new Error('At least one enabled mapping is required.');
+
+  // This onboarding path is intentionally strict: it may populate only a new
+  // or genuinely empty local folder. It never overwrites an existing project.
+  for(const m of normalized){
+    const localRoot=path.join(WORKSPACE,...m.local.split('/'));
+    try{
+      const st=await fsp.stat(localRoot);
+      if(!st.isDirectory()) throw new Error(`Local target exists and is not a folder: ${m.local}`);
+      const entries=await fsp.readdir(localRoot);
+      if(entries.length) throw new Error(`Local target is not empty: ${m.local}`);
+    }catch(e){
+      if(e.code==='ENOENT') continue;
+      throw e;
+    }
+    if(m.remote===normalizeRemote(c.remoteRoot)) throw new Error(`Remote mapping must point to a folder below the cPanel home directory: ${m.remote}`);
+    if(!m.remote.startsWith(normalizeRemote(c.remoteRoot) + '/')) throw new Error(`Remote mapping must be inside the connection remote root: ${m.remote}`);
+  }
+
+  // Use the selected mappings for the initialization run, but persist them only
+  // after the download has completed successfully.
+  const previousMappings=c.mappings;
+  c.mappings=normalized;
+  const manifest=await loadManifest();
+  const downloaded=[];
+  async function walk(remoteDir,localRoot,remoteRoot){
+    const j=await apiGet(c,'Fileman','list_files',{dir:remoteDir});
+    for(const item of (j.data||[])){
+      const nm=String(item.file||item.name||''); if(!nm) continue;
+      const rp=normalizeRemote(`${remoteDir}/${nm}`);
+      const tail=rp.slice(remoteRoot.length).replace(/^\/+/, '');
+      const rel=path.posix.join(localRoot,tail);
+      if(excluded(rel,c.exclude)) continue;
+      if(String(item.type)==='dir'||String(item.type)==='directory'){
+        await walk(rp,localRoot,remoteRoot); continue;
+      }
+      if(!allowedRemote(c,rp)) continue;
+      const local=path.join(WORKSPACE,...rel.split('/'));
+      try { await fsp.access(local); throw new Error(`Local target became non-empty during initialization: ${rel}`); }
+      catch(e) { if(e.code!=='ENOENT') throw e; }
+      const u=new URL(`${c.host}/download`); u.searchParams.set('file',rp);
+      const r=await fetch(u,{headers:authHeaders(c)});
+      if(!r.ok) throw new Error(`Download failed HTTP ${r.status} for ${rp}`);
+      const b=Buffer.from(await r.arrayBuffer());
+      await fsp.mkdir(path.dirname(local),{recursive:true});
+      await fsp.writeFile(local,b,{flag:'wx'});
+      manifest[rel]=sha256(local);
+      downloaded.push(rel);
+      await saveManifest(manifest);
+    }
+  }
+  for(const m of normalized) await walk(m.remote,m.local,m.remote);
+  const store=await loadStore();
+  const stored=store.connections.find(x=>x.name.toLowerCase()===c.name.toLowerCase());
+  if(stored) { stored.mappings=normalized; await saveStore(store); }
+  else c.mappings=previousMappings;
+  return {
+    requiresConfirmation:false,
+    initialized:true,
+    connection:c.name,
+    mappings:normalized,
+    downloaded,
+    count:downloaded.length,
+    message:'Workspace initialized from hosting. The downloaded files are now the local working copy and their SHA-256 hashes were recorded.'
+  };
+}
+
+async function deploy(c, confirm, deletionActions=[]) {
+  const plan=await buildPlan(c);
+  const uploadItems=plan.filter(x=>x.status==='NEW'||x.status==='CHANGED');
+  const deletedItems=plan.filter(x=>x.status==='DELETED');
+  const summary={
+    connection:c.name,
+    new:uploadItems.filter(x=>x.status==='NEW').length,
+    changed:uploadItems.filter(x=>x.status==='CHANGED').length,
+    unchanged:plan.filter(x=>x.status==='UNCHANGED').length,
+    deleted:deletedItems.length,
+    files:uploadItems.map(x=>({status:x.status,path:x.relativePath,size:x.size,mapping:x.mapping})),
+    deletedFiles:deletedItems.map(x=>({status:'DELETED',path:x.relativePath,remote:remoteFromRel(c,x.relativePath)}))
+  };
+  if(!confirm) return {
+    requiresConfirmation:true,
+    summary,
+    message: deletedItems.length
+      ? 'No hosting changes were made. Review NEW/CHANGED uploads and the DELETED LOCAL files. Deleted-local files can be restored from hosting, explicitly deleted from hosting, or left unchanged.'
+      : 'No files were uploaded. Review the plan, then call deploy again with confirm=true after explicit user confirmation.'
+  };
+
+  const manifest=await loadManifest();
+  const uploaded=[]; const failed=[]; const restored=[]; const restoreFailed=[]; const deleted=[]; const deleteFailed=[]; const kept=[];
+  const actionMap=new Map(Array.isArray(deletionActions)?deletionActions.map(x=>[String(x.path),x]):[]);
+
+  for(const item of uploadItems){
+    try{
+      const remote=remoteFromRel(c,item.relativePath);
+      if(!allowedRemote(c,remote)) throw new Error('Remote path is outside configured folders.');
+      await ensureRemoteDir(c,path.posix.dirname(remote));
+      await apiUpload(c,path.posix.dirname(remote),item.localPath);
+      manifest[item.relativePath]=item.hash;
+      await saveManifest(manifest);
+      uploaded.push(item.relativePath);
+    } catch(e){ failed.push({path:item.relativePath,error:e.message}); }
+  }
+
+  for(const item of deletedItems){
+    const action=actionMap.get(item.relativePath);
+    if(!action || action.action==='keep') { kept.push(item.relativePath); continue; }
+    const remote=remoteFromRel(c,item.relativePath);
+    if(!allowedRemote(c,remote)) { deleteFailed.push({path:item.relativePath,error:'Remote path is outside configured folders.'}); continue; }
+    try {
+      if(action.action==='restore') {
+        const hash=await downloadOne(c,remote,item.relativePath,true);
+        manifest[item.relativePath]=hash;
+        await saveManifest(manifest);
+        restored.push(item.relativePath);
+      } else if(action.action==='delete') {
+        if(String(action.confirmation||'')!=='DELETE') throw new Error('Remote deletion requires confirmation value DELETE.');
+        await api2FileOp(c,'trash',remote);
+        delete manifest[item.relativePath];
+        await saveManifest(manifest);
+        deleted.push(item.relativePath);
+      } else {
+        kept.push(item.relativePath);
+      }
+    } catch(e) {
+      if(action.action==='restore') restoreFailed.push({path:item.relativePath,error:e.message});
+      else deleteFailed.push({path:item.relativePath,error:e.message});
+    }
+  }
+
+  return {
+    requiresConfirmation:false,
+    summary,
+    uploaded, failed,
+    restored, restoreFailed,
+    deleted, deleteFailed,
+    kept,
+    message:`Uploaded ${uploaded.length}; restored ${restored.length}; remotely deleted ${deleted.length}; failed ${failed.length + restoreFailed.length + deleteFailed.length}.`
+  };
+}
+
+async function bootstrapDefault(){
+  // The plugin ships with blank Configure fields. A connection is created only
+  // when the user has explicitly supplied all required connection fields.
+  const a = configuredCredentials();
+  if (!a.host && !a.username && !a.remoteRoot && !a.apiToken) return false;
+  if (!a.host || !a.username || !a.remoteRoot || !a.apiToken) return false;
+  const store = await loadStore();
+  if (store.connections.length) return false;
+  const name = configuredConnectionName();
+  const c = validateConnectionInput({
+    name, host:a.host, username:a.username, remoteRoot:a.remoteRoot,
+    apiToken:a.apiToken, mappings:[], exclude:DEFAULT_EXCLUDE
+  });
+  store.connections.push(c);
+  await saveStore(store);
+  log(`Created connection ${name} from explicitly configured connection fields.`);
+  return true;
+}
+
+async function syncDefaultFromEnv(){
+  // Keep the configured connection name synchronized for a single initial
+  // connection. Credentials are never printed or returned.
+  try {
+    const store=await loadStore();
+    const configuredName = configuredConnectionName();
+    if (store.connections.length === 1 && store.connections[0].name === DEFAULT_CONNECTION_NAME && configuredName !== DEFAULT_CONNECTION_NAME) {
+      store.connections[0].name = configuredName;
+      await saveStore(store);
+      log(`Default connection renamed to ${configuredName} from Cursor plugin configuration.`);
+      return true;
+    }
+  } catch (e) { log(`Default connection rename sync skipped: ${e.message}`); }
+  return false;
+}
+
+const TOOLS=[ {name:'cpanel_get_settings',description:'Get per-connection Protection settings without exposing credentials.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}},
+ {name:'cpanel_set_settings',description:'Set per-connection Protection mode and grouped protection settings.',inputSchema:{type:'object',properties:{name:{type:'string'},protectionMode:{type:'string',enum:['SECURED','CUSTOM','OFF']},protection:{type:'object'},largeFileThresholdMB:{type:'number'},retryAttempts:{type:'number'},reportRetention:{type:'number'},backupRetention:{type:'number'},autoDeploy:{type:'boolean'},verifyAfterSync:{type:'boolean'},verifyMethod:{type:'string'}},required:['name']}} ,
+
+ {name:'cpanel_help',description:'Return the complete list of cPanel Hosting Deploy commands and exactly what each command does.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
+ {name:'cpanel_list_connections',description:'List configured cPanel connections without exposing secrets.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
+ {name:'cpanel_add_connection',description:'Add a cPanel connection. The API token is encrypted with Windows DPAPI and never returned.',inputSchema:{type:'object',properties:{name:{type:'string'},host:{type:'string'},username:{type:'string'},apiToken:{type:'string'},remoteRoot:{type:'string'},mappings:{type:'array',items:{type:'object',properties:{local:{type:'string'},remote:{type:'string'},enabled:{type:'boolean'}},required:['local','remote']}},exclude:{type:'array',items:{type:'string'}}},required:['name','host','username','apiToken','remoteRoot']}},
+ {name:'cpanel_edit_connection',description:'Edit a connection. If apiToken is omitted, the existing encrypted token is preserved.',inputSchema:{type:'object',properties:{name:{type:'string'},newName:{type:'string'},host:{type:'string'},username:{type:'string'},apiToken:{type:'string'},remoteRoot:{type:'string'},mappings:{type:'array',items:{type:'object',properties:{local:{type:'string'},remote:{type:'string'},enabled:{type:'boolean'}},required:['local','remote']}},exclude:{type:'array',items:{type:'string'}}},required:['name']}},
+ {name:'cpanel_remove_connection',description:'Remove a stored cPanel connection.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}},
+ {name:'cpanel_list_remote_folders',description:'List directories under the connection remote root so the user can choose deployment mappings. Read-only.',inputSchema:{type:'object',properties:{name:{type:'string'},path:{type:'string'}},required:['name']}} ,
+ {name:'cpanel_test_connection',description:'Test cPanel credentials and remote root access.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}},
+ {name:'cpanel_workspace_setup',description:'Safely initialize a local workspace from selected remote cPanel folders. This mode only writes into missing or genuinely empty local folders and never overwrites existing project files.',inputSchema:{type:'object',properties:{name:{type:'string'},mappings:{type:'array',items:{type:'object',properties:{local:{type:'string'},remote:{type:'string'},enabled:{type:'boolean'}},required:['local','remote']}},confirm:{type:'boolean'}},required:['name','mappings','confirm']}},
+ {name:'cpanel_workspace_state',description:'Read-only check of the current local workspace state. Call this before onboarding or changing mappings.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}},
+ {name:'cpanel_deploy_plan',description:'Build a local deployment plan. Never modifies hosting.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}},
+ {name:'cpanel_deploy',description:'Deploy NEW and CHANGED files. DELETED local files are never deleted remotely automatically; provide explicit per-file actions restore, delete (requires confirmation DELETE), or keep.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'},deletionActions:{type:'array',items:{type:'object',properties:{path:{type:'string'},action:{type:'string',enum:['restore','delete','keep']},confirmation:{type:'string'}},required:['path','action']}}},required:['name','confirm']}},
+ {name:'cpanel_local_upload',description:'Explicit full local-to-remote upload. Overwrites existing remote files and adds new local files after explicit confirmation.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'}},required:['name','confirm']}},
+ {name:'cpanel_remote_status',description:'Read-only remote-to-local comparison. Detect REMOTE NEW, REMOTE CHANGED, and REMOTE DELETED using a saved remote metadata baseline. Never modifies local files except the remote metadata observation file.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}},
+ {name:'cpanel_remote_sync',description:'Synchronize explicitly selected remote changes into the local workspace. REMOTE CHANGED requires OVERWRITE_LOCAL confirmation; REMOTE DELETED requires DELETE_LOCAL confirmation.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'},actions:{type:'array',items:{type:'object',properties:{path:{type:'string'},action:{type:'string',enum:['sync','keep']},confirmation:{type:'string'}},required:['path','action']}}},required:['name','confirm']}},
+ {name:'cpanel_download',description:'Explicitly download configured remote folders. This can overwrite local files; use only when the user explicitly requests a download/restore.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}}
+];
+
+async function callTool(name,a){
+  await syncDefaultFromEnv();
+  if(name==='cpanel_help'){return {version:VERSION,commands:[
+    {command:'/cpanel',description:'Open the main cPanel Hosting Deploy command menu.'},
+    {command:'/cpanel-hosting-help',description:'Show the complete command reference.'},
+    {command:'/cpanel-hosting-config',description:'Configure connections, mappings, and Protection mode.'},{command:'/cpanel-hosting-settings',description:'Configure per-connection Protection and operational safety settings.'},
+    {command:'/cpanel-hosting-connections',description:'Start workspace onboarding and mapping.'},
+    {command:'/cpanel-local-status',description:'Read-only local project status for deployment: NEW, CHANGED, UNCHANGED, DELETED.'},
+    {command:'/cpanel-local-deploy',description:'Safely deploy local NEW/CHANGED files and explicitly resolve locally deleted files.'},
+    {command:'/cpanel-local-upload',description:'Explicit full local-to-remote upload; overwrites existing remote files and adds new ones only after confirmation.'},
+    {command:'/cpanel-remote-status',description:'Read-only remote status: detect REMOTE NEW, REMOTE CHANGED and REMOTE DELETED.'},
+    {command:'/cpanel-remote-sync',description:'Explicitly synchronize selected remote changes into the local workspace.'},
+    {command:'/cpanel-remote-download',description:'Explicitly download configured hosting files/folders to the local workspace.'}
+  ]};}
+  if(name==='cpanel_get_settings'){const c=await getConnection(a.name);return {connection:c.name,settings:normalizeSettings(c.settings),warning:protectionWarning(c)};}
+  if(name==='cpanel_set_settings'){const c=await getConnection(a.name);const p={};if(a.protectionMode!==undefined)p.protectionMode=a.protectionMode;if(a.protection!==undefined)p.protection=a.protection;if(a.largeFileThresholdMB!==undefined)p.largeFileThresholdBytes=Math.max(1,Number(a.largeFileThresholdMB)*1024*1024);for(const k of ['retryAttempts','reportRetention','backupRetention','autoDeploy','verifyAfterSync','verifyMethod'])if(a[k]!==undefined)p[k]=a[k];const settings=await updateSettings(c,p);return {connection:c.name,settings,warning:protectionWarning(c)};}
+  if(name==='cpanel_list_connections'){const s=await loadStore();return {connections:s.connections.map(sanitizeConnection)};}
+  if(name==='cpanel_add_connection'){const s=await loadStore();if(s.connections.some(x=>x.name.toLowerCase()===String(a.name).toLowerCase()))throw new Error('A connection with that name already exists.');const c=validateConnectionInput(a);s.connections.push(c);await saveStore(s);return {connection:sanitizeConnection(c),message:'Connection added. Secret token is encrypted locally and was not returned.'};}
+  if(name==='cpanel_edit_connection'){const s=await loadStore();const c=s.connections.find(x=>x.name.toLowerCase()===String(a.name).toLowerCase());if(!c)throw new Error(`Connection not found: ${a.name}`);if(a.newName)c.name=safeName(a.newName);if(a.host)c.host=safeName(a.host).replace(/\/+$/,'');if(a.username)c.username=safeName(a.username);if(a.remoteRoot)c.remoteRoot=normalizeRemote(a.remoteRoot);if(a.mappings)c.mappings=normalizeMappings(c.remoteRoot,a.mappings);if(a.exclude)c.exclude=a.exclude.map(String).filter(Boolean);if(a.settings)c.settings=normalizeSettings(a.settings);if(a.apiToken)c.tokenEncrypted=protectToken(a.apiToken);await saveStore(s);return {connection:sanitizeConnection(c),message:'Connection updated. Secret token was not returned.'};}
+  if(name==='cpanel_remove_connection'){const s=await loadStore();const before=s.connections.length;s.connections=s.connections.filter(x=>x.name.toLowerCase()!==String(a.name).toLowerCase());if(s.connections.length===before)throw new Error(`Connection not found: ${a.name}`);await saveStore(s);return {removed:a.name};}
+  if(name==='cpanel_list_remote_folders'){const c=await getConnection(a.name);const dir=normalizeRemote(a.path||c.remoteRoot);const j=await apiGet(c,'Fileman','list_files',{dir});return {connection:c.name,path:dir,folders:(j.data||[]).filter(x=>String(x.type)==='dir'||String(x.type)==='directory').map(x=>String(x.file||x.name||'')).filter(Boolean)};}
+  if(name==='cpanel_test_connection'){const c=await getConnection(a.name);const j=await apiGet(c,'Fileman','list_files',{dir:c.remoteRoot});return {ok:true,connection:sanitizeConnection(c),remoteRootItems:Array.isArray(j.data)?j.data.length:0,message:'cPanel connection is working.'};}
+  if(name==='cpanel_workspace_state'){const c=await getConnection(a.name);return await workspaceState(c);}
+  if(name==='cpanel_workspace_setup'){const c=await getConnection(a.name);return await initializeWorkspaceFromHost(c,a.mappings,Boolean(a.confirm));}
+  if(name==='cpanel_deploy_plan'){const c=await getConnection(a.name);const plan=await buildPlan(c);return {connection:c.name,summary:{new:plan.filter(x=>x.status==='NEW').length,changed:plan.filter(x=>x.status==='CHANGED').length,unchanged:plan.filter(x=>x.status==='UNCHANGED').length,deleted:plan.filter(x=>x.status==='DELETED').length},files:plan.filter(x=>x.status!=='UNCHANGED').map(x=>({status:x.status,path:x.relativePath,size:x.size}))};}
+  if(name==='cpanel_deploy'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);const plan=await buildPlan(c);const accepted=[];if(st.protectionMode!=='OFF'&&protectionEnabled(c,'acceptedAutomatic')){for(const x of plan.filter(x=>x.status==='CHANGED'||x.status==='NEW')){const ac=await getAccepted(c,x.relativePath);if(ac?.side==='LOCAL')accepted.push(x);}}
+    if(st.autoDeploy&&accepted.length){const actions=accepted.map(x=>({path:x.relativePath,auto:true}));if(!a.confirm){return {requiresConfirmation:false,autoAccepted:true,warning:protectionWarning(c),acceptedLocal:actions,message:'Auto Deploy is ON. Accepted Local files will be uploaded when the deploy command is manually invoked.'};}}
+    const r=await deploy(c,Boolean(a.confirm)||Boolean(st.autoDeploy&&accepted.length),a.deletionActions||[]);if(st.protectionMode==='OFF') return r;if(r && accepted.length)r.acceptedLocal=accepted.map(x=>x.relativePath);r.protection=protectionWarning(c);return r;}
+  if(name==='cpanel_local_upload'){
+    const c=await getConnection(a.name);
+    const files=[];
+    for(const m of (c.mappings||[])){ if(m.enabled===false) continue; const root=path.join(WORKSPACE,...m.local.split('/')); try{await fsp.access(root);}catch(_){continue;}
+      async function walk(dir){ for(const ent of await fsp.readdir(dir,{withFileTypes:true})){ const full=path.join(dir,ent.name); const rel=relativePosix(full); if(excluded(rel,c.exclude)) continue; if(ent.isDirectory()){await walk(full);continue;} const remote=remoteFromRel(c,rel); files.push({path:rel,remote,size:ent.size}); }}
+      await walk(root); }
+    if(!a.confirm) return {requiresConfirmation:true,connection:c.name,count:files.length,files,message:'FULL LOCAL → HOSTING upload. Existing remote files with the same paths will be overwritten; new local files will be added; remote-only files will not be deleted. No changes were made.'};
+    const manifest=await loadManifest(),uploaded=[],failed=[];
+    for(const f of files){try{await ensureRemoteDir(c,path.posix.dirname(f.remote));await apiUpload(c,path.posix.dirname(f.remote),path.join(WORKSPACE,...f.path.split('/')));manifest[f.path]=sha256(path.join(WORKSPACE,...f.path.split('/')));await saveManifest(manifest);uploaded.push(f.path);}catch(e){failed.push({path:f.path,error:e.message});}}
+    return {requiresConfirmation:false,connection:c.name,uploaded,failed,message:`Full upload completed: ${uploaded.length} uploaded, ${failed.length} failed.`};
+  }
+  if(name==='cpanel_remote_status'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);if(st.protectionMode==='OFF') return await buildRemoteStatus(c);const r=await buildRemoteStatusProtected(c);r.protection=protectionWarning(c);return r;}
+  if(name==='cpanel_remote_sync'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);const r=await remoteSync(c,a.actions||[],Boolean(a.confirm));if(st.protectionMode==='OFF') return r;r.protection=protectionWarning(c);if(r.requiresConfirmation)return r;if(st.verifyAfterSync&&protectionEnabled(c,'contentVerification')){r.verification='requested';}return r;}
+  if(name==='cpanel_download'){const c=await getConnection(a.name);const manifest=await loadManifest();const files=[];const errors=[];async function walk(remoteDir,localRoot,remoteRoot){const j=await apiGet(c,'Fileman','list_files',{dir:remoteDir});for(const item of (j.data||[])){const nm=String(item.file||item.name||'');if(!nm)continue;const rp=normalizeRemote(`${remoteDir}/${nm}`);const tail=rp.slice(remoteRoot.length).replace(/^\/+/, '');const rel=path.posix.join(localRoot,tail);if(excluded(rel,c.exclude))continue;if(String(item.type)==='dir'||String(item.type)==='directory'){await walk(rp,localRoot,remoteRoot);continue;}if(!allowedRemote(c,rp))continue;files.push({rp,rel});}}
+    for(const m of (c.mappings||[])){if(m.enabled===false)continue;await walk(normalizeRemote(m.remote),m.local,normalizeRemote(m.remote));}
+    let next=0;const workers=Array.from({length:6},async()=>{while(true){const i=next++;if(i>=files.length)return;const {rp,rel}=files[i];try{const u=new URL(`${c.host}/download`);u.searchParams.set('file',rp);const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});if(!r.ok)throw new Error(`HTTP ${r.status}`);const b=Buffer.from(await r.arrayBuffer());const local=path.join(WORKSPACE,...rel.split('/'));await fsp.mkdir(path.dirname(local),{recursive:true});await fsp.writeFile(local,b);manifest[rel]=sha256(local);}catch(e){errors.push({path:rel,error:String(e.message||e)});}}});await Promise.all(workers);await saveManifest(manifest);return {downloaded:files.filter(x=>Object.prototype.hasOwnProperty.call(manifest,x.rel)).map(x=>x.rel),count:files.filter(x=>Object.prototype.hasOwnProperty.call(manifest,x.rel)).length,failed:errors,message:errors.length?`Download completed with ${errors.length} failed file(s).`:'Download completed successfully.',warning:'Download was explicitly requested. Existing local files may be overwritten.'};}
+  throw new Error(`Unknown tool: ${name}`);
+}
+
+async function main(){
+  await bootstrapDefault();
+  let buf='';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data',chunk=>{buf+=chunk;let idx;while((idx=buf.indexOf('\n'))>=0){const line=buf.slice(0,idx);buf=buf.slice(idx+1);if(line.trim())handle(readJsonLine(line));}});
+  process.stdin.on('end',()=>{});
+}
+async function handle(req){
+  if(!req||req.jsonrpc!=='2.0'||req.id===undefined)return;
+  try{
+    if(req.method==='initialize') return result(req.id,{protocolVersion:'2024-11-05',capabilities:{tools:{}},serverInfo:{name:'cpanel-hosting-deploy',version:VERSION}});
+    if(req.method==='tools/list') return result(req.id,{tools:TOOLS});
+    if(req.method==='tools/call'){const r=await callTool(req.params.name,req.params.arguments||{});return result(req.id,{content:[{type:'text',text:JSON.stringify(r,null,2)}],structuredContent:r});}
+    if(req.method==='ping') return result(req.id,{});
+    return error(req.id,-32601,`Method not found: ${req.method}`);
+  }catch(e){return result(req.id,{content:[{type:'text',text:`ERROR: ${e.message}`}],isError:true});}
+}
+main().catch(e=>{log(e.stack||e.message);process.exit(1);});
