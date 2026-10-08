@@ -1,3 +1,9 @@
+## [1.11.4] - 2026-10-08
+
+### Fixed
+- Write manifest, remote baseline, pending state, and protection state atomically through temporary files and rename.
+- Fail closed when protection state exists but is unreadable/corrupted instead of silently resetting accepted decisions.
+
 ## [1.11.3] - 2026-10-08
 
 ### Fixed

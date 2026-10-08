@@ -8,7 +8,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
-const VERSION = '1.11.3';
+const VERSION = '1.11.4';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];
@@ -338,7 +338,7 @@ async function loadManifest(){
   try { const x=JSON.parse(await fsp.readFile(manifestPath(),'utf8')); return x && typeof x==='object'?x:{}; }
   catch(_){ return {}; }
 }
-async function saveManifest(m){ const d=path.dirname(manifestPath()); await fsp.mkdir(d,{recursive:true}); await fsp.writeFile(manifestPath(),JSON.stringify(m,null,2),'utf8'); }
+async function saveManifest(m){ await atomicJsonWrite(manifestPath(),m); }
 
 
 // Remote file inventory used by local status/deploy and remote status.
@@ -446,7 +446,7 @@ async function loadRemoteMeta(){
   try { const x=JSON.parse(await fsp.readFile(remoteMetaPath(),'utf8')); return x && typeof x==='object'?x:{}; }
   catch(_){ return {}; }
 }
-async function saveRemoteMeta(m){ const d=path.dirname(remoteMetaPath()); await fsp.mkdir(d,{recursive:true}); await fsp.writeFile(remoteMetaPath(),JSON.stringify(m,null,2),'utf8'); }
+async function saveRemoteMeta(m){ await atomicJsonWrite(remoteMetaPath(),m); }
 function remoteMetaEqual(a,b){
   if(!a || !b) return false;
   const as=Number(a.size ?? -1), bs=Number(b.size ?? -1);
@@ -468,13 +468,22 @@ async function loadRemotePending(){
   try { const x=JSON.parse(await fsp.readFile(await remotePendingPath(),'utf8')); return x && typeof x==='object'?x:null; }
   catch(_){ return null; }
 }
-async function saveRemotePending(x){ const d=path.dirname(await remotePendingPath()); await fsp.mkdir(d,{recursive:true}); await fsp.writeFile(await remotePendingPath(),JSON.stringify(x,null,2),'utf8'); }
+async function atomicJsonWrite(file,value){
+  const dir=path.dirname(file); await fsp.mkdir(dir,{recursive:true});
+  const tmp=path.join(dir,'.'+path.basename(file)+'.'+process.pid+'.'+crypto.randomUUID()+'.tmp');
+  try{ await fsp.writeFile(tmp,JSON.stringify(value,null,2),'utf8'); await fsp.rename(tmp,file); }
+  finally{ await fsp.rm(tmp,{force:true}).catch(()=>{}); }
+}
+async function saveRemotePending(x){ await atomicJsonWrite(await remotePendingPath(),x); }
 async function clearRemotePending(){ try{await fsp.unlink(await remotePendingPath());}catch(_){} }
 
 
 function protectionStatePath(){return path.join(WORKSPACE,'.hosting','protection-state.json');}
-async function loadProtectionState(){try{const x=JSON.parse(await fsp.readFile(protectionStatePath(),'utf8'));return x&&typeof x==='object'?x:{};}catch(_){return {};}}
-async function saveProtectionState(x){const d=path.dirname(protectionStatePath());await fsp.mkdir(d,{recursive:true});await fsp.writeFile(protectionStatePath(),JSON.stringify(x,null,2),'utf8');}
+async function loadProtectionState(){
+  try { const x=JSON.parse(await fsp.readFile(protectionStatePath(),'utf8')); return x&&typeof x==='object'?x:{}; }
+  catch(e){ if(e.code==='ENOENT') return {}; throw new Error('Protection state is unreadable or corrupted: '+e.message); }
+}
+async function saveProtectionState(x){ await atomicJsonWrite(protectionStatePath(),x);}
 function backupRoot(){return path.join(WORKSPACE,'sync-backup');}
 function remoteBackupRoot(){return '.cpanel-sync-backup';}
 function reportRoot(){return path.join(WORKSPACE,'sync-reports');}
