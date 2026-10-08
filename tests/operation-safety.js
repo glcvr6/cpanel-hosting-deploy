@@ -32,7 +32,11 @@ assert(s.includes("withOperationLock(c,'workspace-setup'"),'workspace setup lock
 assert(s.includes("withOperationLock(c,'local-upload'"),'full local upload lock missing');
 assert(s.includes("withOperationLock(c,'download'"),'download lock missing');
 assert(s.includes("async function assertSafeLocalPath(target)"),'local filesystem safety helper missing');
+assert(s.includes("async function withManifestLock(fn)"),'manifest transaction lock missing');
+assert(s.includes("async function updateManifestEntry(rel,value)"),'manifest entry transaction helper missing');
+assert(s.includes("async function buildPlan(c)"),'build plan wrapper missing');
+assert(s.includes("return await withManifestLock(()=>buildPlanUnlocked(c));"),'build plan must serialize manifest read-modify-write state');
 assert(s.includes("st.isSymbolicLink()"),'symbolic links must be rejected in deployment paths');
 assert(s.includes("AbortSignal.timeout(120000)"),'cPanel API calls must have bounded timeouts');
-assert(s.includes("const VERSION = '1.12.0';"),'server version must match the current release');
+assert(s.includes("const VERSION = '1.13.0';"),'server version must match the current release');
 console.log('Operation safety regression: PASS');

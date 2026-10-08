@@ -1,3 +1,9 @@
+## [1.13.0] - 2026-10-08
+
+### Fixed
+- Serialize deployment-manifest read-modify-write transactions with a dedicated lock.
+- Protect plan generation and local synchronization writes from concurrent manifest updates.
+
 ## [1.12.0] - 2026-10-08
 
 ### Fixed
