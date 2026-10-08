@@ -915,7 +915,7 @@ async function buildPlanUnlocked(c){
         // If the local mapping exists and contains any file missing from the manifest,
         // a remote baseline may be required.
         // We intentionally do not inspect every file here; buildPlan below will decide.
-        try { fs.accessSync(root); } catch(_) { continue; }
+        try { await assertSafeLocalPath(root); fs.accessSync(root); } catch(_) { continue; }
         return true;
       }
       return false;
@@ -934,7 +934,7 @@ async function buildPlanUnlocked(c){
     for (const m of (c.mappings || [])) {
       if (m.enabled === false) continue;
       const root = path.join(WORKSPACE, ...m.local.split('/'));
-      try { fs.accessSync(root); } catch (_) { continue; }
+      try { await assertSafeLocalPath(root); fs.accessSync(root); } catch (_) { continue; }
       async function collect(dir) {
         for (const ent of await fsp.readdir(dir, {withFileTypes:true})) {
           const full = path.join(dir, ent.name);
