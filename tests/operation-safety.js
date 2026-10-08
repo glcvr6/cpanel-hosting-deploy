@@ -17,7 +17,7 @@ assert(s.includes("saveRemotePending(x){ await atomicJsonWrite") || s.includes("
 assert(s.includes("async function saveManifest(m){ await atomicJsonWrite(manifestPath(),m); }"),'manifest writes must be atomic');
 assert(s.includes("async function saveRemoteMeta(m){ await atomicJsonWrite(remoteMetaPath(),m); }"),'remote baseline writes must be atomic');
 assert(s.includes("fss.open(lockPath,'wx')") || s.includes("fsp.open(lockPath,'wx')"),'lock must use exclusive file creation');
-assert(s.includes("process.kill(Number(owner.pid),0)"),'lock recovery must verify whether the recorded owner process is still alive');
+assert(s.includes("process.kill(Number(existing.pid),0)"),'lock recovery must verify whether the recorded owner process is still alive');
 assert(s.includes("pidError.code==='ESRCH'"),'lock recovery must distinguish a stale dead-process lock from an active lock');
 assert(s.includes("lock metadata is invalid"),'invalid lock metadata must fail closed');
 assert(s.includes("protectionEnabled(c,'locks')"),'lock protection gate missing');
