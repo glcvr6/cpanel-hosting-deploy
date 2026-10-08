@@ -13,7 +13,7 @@
 
 cPanel Hosting Deploy connects a Cursor workspace to one or more cPanel accounts, tracks file state with SHA-256 baselines, detects local and remote changes, identifies conflicts, and keeps destructive actions explicit.
 
-> **v1.13.2:** Serializes deployment-manifest read-modify-write transactions to prevent concurrent operations from losing state. the live remote state immediately before deploy and 
+> **v1.13.2:** Hardens state persistence and concurrent operation handling with transactional manifest locking, atomic connection-store initialization, remote-state revalidation, local filesystem protections, bounded API requests, and a fix for a stale download manifest write that could fail completed downloads at runtime.
 
 ---
 
@@ -50,6 +50,9 @@ Typical FTP-style deployment workflows make it easy to overwrite or delete the w
 - Remote deletion routed through cPanel trash behavior where supported.
 - Configurable Protection modes: `OFF`, `CUSTOM`, `SECURED`.
 - Credential-clean distribution.
+- Atomic persisted state and transaction locks for shared local state.
+- Remote TOCTOU revalidation immediately before sensitive overwrite/delete/restore actions.
+- Local symlink/path-boundary protection and bounded cPanel API requests.
 - Windows DPAPI credential protection in the local workflow.
 - Retry/partial-success handling and reporting architecture.
 
@@ -138,6 +141,23 @@ See [`docs/PROTECTION-TESTING.md`](docs/PROTECTION-TESTING.md).
 
 See [`docs/SAFETY.md`](docs/SAFETY.md).
 
+## State and recovery safety
+
+v1.13.x significantly strengthens persisted and concurrent state:
+
+- JSON state writes use temporary-file replacement rather than in-place writes.
+- Connections-store mutations are serialized as transactions, including first-run initialization.
+- Manifest read-modify-write transactions use a dedicated lock.
+- Operation and Protection-state locks detect stale owners and verify lock ownership before cleanup.
+- Corrupt manifest, remote-baseline, connection-store, and Protection-state data fails closed.
+- Remote size/mtime snapshots are revalidated immediately before relevant overwrite/delete/restore actions.
+- Partial-success synchronization advances the remote baseline only for successfully synchronized items.
+- Local deployment paths reject symlink components and workspace escapes.
+- cPanel API requests have bounded timeouts.
+- Backups use unique names and retention cleanup.
+
+For the detailed model, see [`docs/SAFETY.md`](docs/SAFETY.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ## Development
 
 Requirements:
@@ -223,16 +243,16 @@ For the full donation details, see [`SUPPORT.md`](SUPPORT.md).
 
 ## Roadmap
 
-### v1.11.x
+### Current
 
-- Real-world Protection testing.
-- Expand automated Protection regression coverage.
-- Improve recovery/backup test coverage.
+- Broader real-world Protection testing.
+- Expand end-to-end and fault-injection coverage.
 - Gather compatibility reports from different cPanel environments.
+- Continue recovery and backup testing under interrupted operations.
 
 ### Future
 
-- Broader automated integration testing.
+- Broader automated integration testing against a mock cPanel API.
 - More granular diagnostics and test tooling.
 - Additional deployment/recovery improvements driven by community testing.
 
