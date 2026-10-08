@@ -18,4 +18,5 @@ cp.execFileSync(process.execPath,[path.join(root,'tests/transfer-retry.js')],{st
 cp.execFileSync(process.execPath,[path.join(root,'tests/operation-safety.js')],{stdio:'inherit'});
 cp.execFileSync(process.execPath,[path.join(root,'tests/partial-success-baseline.js')],{stdio:'inherit'});
 cp.execFileSync(process.execPath,[path.join(root,'tests/security-boundaries.js')],{stdio:'inherit'});
+cp.execFileSync(process.execPath,[path.join(root,'tests/state-recovery.js')],{stdio:'inherit'});
 console.log('cPanel Hosting Deploy 1.11.6 validation: PASS');
