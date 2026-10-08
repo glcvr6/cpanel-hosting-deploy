@@ -1,5 +1,10 @@
 # cPanel Hosting Deploy
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/glcvr6/cpanel-hosting-deploy/main/docs/assets/cpanel-hosting-deploy-banner.svg" alt="cPanel Hosting Deploy — Cursor to cPanel safe synchronization" width="920">
+</p>
+
+
 [![CI](https://github.com/glcvr6/cpanel-hosting-deploy/actions/workflows/ci.yml/badge.svg)](https://github.com/glcvr6/cpanel-hosting-deploy/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-1.11.0-blue.svg)](https://github.com/glcvr6/cpanel-hosting-deploy/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
