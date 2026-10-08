@@ -260,10 +260,38 @@ function relativePosix(full){
   if (rel.startsWith('../') || rel==='..' || path.isAbsolute(rel)) throw new Error(`Path outside workspace: ${full}`);
   return rel;
 }
+function normalizeExcludePath(value){
+  let x=String(value||'').trim().replaceAll('\\','/');
+  while(x.startsWith('/')) x=x.slice(1);
+  while(x.endsWith('/')) x=x.slice(0,-1);
+  if(x.startsWith('./')) x=x.slice(2);
+  return x.toLowerCase();
+}
 function excluded(rel, list){
-  const parts=rel.replaceAll('\\','/').split('/');
-  if (list.some(x=>parts.some(p=>p.toLowerCase()===String(x).replaceAll('\\','/').replace(/^\/+|\/+$/g,'').toLowerCase()))) return true;
-  return path.extname(rel).toLowerCase()==='.zip';
+  let normalizedRel=String(rel||'').replaceAll('\\','/');
+  while(normalizedRel.startsWith('/')) normalizedRel=normalizedRel.slice(1);
+  while(normalizedRel.endsWith('/')) normalizedRel=normalizedRel.slice(0,-1);
+  if(normalizedRel.startsWith('./')) normalizedRel=normalizedRel.slice(2);
+
+  const normalizedRelLower=normalizedRel.toLowerCase();
+  const parts=normalizedRelLower.split('/').filter(Boolean);
+
+  for(const raw of (Array.isArray(list)?list:[])){
+    const pattern=normalizeExcludePath(raw);
+    if(!pattern) continue;
+
+    // Path excludes match the exact relative path and everything below it.
+    if(pattern.includes('/')){
+      if(normalizedRelLower===pattern || normalizedRelLower.startsWith(pattern+'/')) return true;
+      continue;
+    }
+
+    // Component excludes match a directory/file name anywhere in the path.
+    if(parts.includes(pattern)) return true;
+  }
+
+  if(isIgnoredProtectionPath(normalizedRel)) return true;
+  return path.extname(normalizedRel).toLowerCase()==='.zip';
 }
 function mappingForLocal(c,rel){
   const normalized=rel.replaceAll('\\','/');
@@ -304,6 +332,9 @@ async function listRemoteFiles(c) {
       if (!nm) continue;
       const rp = normalizeRemote(`${dir}/${nm}`);
       const type = String(item.type || '').toLowerCase();
+
+      const rel = relFromRemote(c, rp);
+      if (!rel || excluded(rel, c.exclude)) continue;
 
       if (type === 'dir' || type === 'directory') {
         if (allowedRemote(c, rp)) await walk(rp);
@@ -421,7 +452,15 @@ async function saveProtectionState(x){const d=path.dirname(protectionStatePath()
 function backupRoot(){return path.join(WORKSPACE,'sync-backup');}
 function remoteBackupRoot(){return '.cpanel-sync-backup';}
 function reportRoot(){return path.join(WORKSPACE,'sync-reports');}
-function isIgnoredProtectionPath(rel){const p=String(rel).replaceAll('\\','/');return p.includes('.remote-deleted.backup')||p.startsWith('sync-backup/')||p.includes('/sync-backup/')||p.startsWith('sync-reports/')||p.includes('/sync-reports/');}
+function isIgnoredProtectionPath(rel){
+  const p=String(rel).replaceAll('\\','/');
+  return p.includes('.remote-deleted.backup') ||
+    p.includes('.remote-overwritten.backup') ||
+    p.includes('.local-deleted.backup') ||
+    p.startsWith('sync-backup/') || p.includes('/sync-backup/') ||
+    p.startsWith('sync-reports/') || p.includes('/sync-reports/') ||
+    p.startsWith('.cpanel-sync-backup/') || p.includes('/.cpanel-sync-backup/');
+}
 async function copyLocalBackup(rel,suffix){
   const src=localPathForRel(rel); if(!fs.existsSync(src)) return null;
   const dst=path.join(backupRoot(),...String(rel).split('/'))+`.${suffix}.backup`;
@@ -436,6 +475,7 @@ async function remoteBackup(c,remotePath,rel,suffix){
 async function requireKeyword(action,provided,enabled=true){if(!enabled)return; if(String(provided||'').toUpperCase()!==action)throw new Error(`This operation requires confirmation keyword ${action}.`);}
 async function verifyRemoteContent(c,rp,localFile){const rh=await remoteSha256(c,rp);if(rh===null)return {ok:false,missing:true};const lh=sha256(localFile);return {ok:rh===lh,localHash:lh,remoteHash:rh};}
 async function retryOperation(fn,attempts){let last;for(let i=0;i<attempts;i++){try{return await fn(i+1);}catch(e){last=e;if(i===attempts-1)throw e;}}throw last;}
+function transferAttempts(c){return protectionEnabled(c,'retry') ? normalizeSettings(c.settings).retryAttempts : 1;}
 async function writeReport(c,title,data){if(!protectionEnabled(c,'reports'))return null;const dir=reportRoot();await fsp.mkdir(dir,{recursive:true});const stamp=new Date().toISOString().replace(/[:.]/g,'-');let p=path.join(dir,`${stamp}-${title}.md`),n=1;while(fs.existsSync(p))p=path.join(dir,`${stamp}-${title}.${n++}.md`);await fsp.writeFile(p,`# ${title}\n\nConnection: ${c.name}\nTime: ${new Date().toISOString()}\n\n\`\`\`json\n${JSON.stringify(data,null,2)}\n\`\`\`\n`,'utf8');return p;}
 async function cleanupRetention(dir,limit){try{await fsp.mkdir(dir,{recursive:true});const files=(await fsp.readdir(dir,{withFileTypes:true})).filter(x=>x.isFile()).map(x=>x.name).sort().reverse();for(const f of files.slice(limit))await fsp.unlink(path.join(dir,f));}catch(e){log(`Retention cleanup failed: ${e.message}`);}}
 function acceptedStateKey(c,rel){return `${c.name}::${rel}`;}
@@ -444,7 +484,8 @@ async function setAccepted(c,rel,value){const st=await loadProtectionState();st.
 async function getSettings(c){return normalizeSettings(c.settings);}
 async function updateSettings(c,patch){c.settings=normalizeSettings({...normalizeSettings(c.settings),...patch,protection:{...normalizeSettings(c.settings).protection,...(patch.protection||{})}});const store=await loadStore();const idx=store.connections.findIndex(x=>x.name.toLowerCase()===c.name.toLowerCase());if(idx<0)throw new Error(`Connection not found: ${c.name}`);store.connections[idx].settings=c.settings;await saveStore(store);return c.settings;}
 function protectionWarning(c){const st=normalizeSettings(c.settings);if(st.protectionMode==='OFF')return 'Protection is OFF: only the original v1.10.3 core workflow is active.';return st.protectionMode==='SECURED'?'Protection SECURED: all protection rules are active.':'Protection CUSTOM: only selected protection rules are active.';}
-async function buildRemoteStatus(c){
+async function buildRemoteStatus(c, options={}){
+  const advanceBaseline=options.advanceBaseline!==false;
   const manifest=await loadManifest();
   const previous=await loadRemoteMeta();
   const hadBaseline=Object.keys(previous).length>0;
@@ -486,7 +527,7 @@ async function buildRemoteStatus(c){
     if(!remoteFiles.has(rp)) remoteDeleted.push({path:rel,remote:rp});
   }
 
-  await saveRemoteMeta(current);
+  if(advanceBaseline) await saveRemoteMeta(current);
   const pending={createdAt:new Date().toISOString(),connection:c.name,remoteNew,remoteUntracked,remoteChanged,remoteDeleted,conflicts};
   await saveRemotePending(pending);
   return {
@@ -502,7 +543,8 @@ async function buildRemoteStatus(c){
   };
 }
 
-async function buildRemoteStatusProtected(c){
+async function buildRemoteStatusProtected(c, options={}){
+  const advanceBaseline=options.advanceBaseline!==false;
   const manifest=await loadManifest();
   const previous=await loadRemoteMeta();
   const hadBaseline=Object.keys(previous).length>0;
@@ -547,7 +589,7 @@ async function buildRemoteStatusProtected(c){
   // A read-only status check never advances the remote baseline when differences exist.
   // If every tracked pair is confirmed identical, the current state is safe to accept.
   const hasDifferences = remoteNew.length||remoteChanged.length||remoteDeleted.length||conflicts.length;
-  if (!hasDifferences || (!remoteChanged.length && !remoteDeleted.length && !conflicts.length)) await saveRemoteMeta(current);
+  if(advanceBaseline && (!hasDifferences || (!remoteChanged.length && !remoteDeleted.length && !conflicts.length))) await saveRemoteMeta(current);
   const pending={createdAt:new Date().toISOString(),connection:c.name,remoteNew,remoteUntracked,remoteChanged,remoteDeleted,conflicts};
   await saveRemotePending(pending);
   return {
@@ -564,10 +606,15 @@ async function buildRemoteStatusProtected(c){
 }
 
 async function remoteSync(c, actions, confirm){
-  // Always refresh remote state immediately before a sync decision.
-  // Never rely on a stale pending snapshot because the remote may have
-  // changed after the last /cpanel-remote-status call.
-  const pending=await buildRemoteStatus(c);
+  // Refresh the remote observation immediately before a sync decision, but
+  // NEVER advance the comparison baseline during this refresh. The baseline
+  // must remain the state against which the user was shown the change.
+  // Otherwise remote-status can report a change and remote-sync can erase it
+  // from its own comparison before applying the requested action.
+  const st=normalizeSettings(c.settings);
+  const pending=st.protectionMode==='OFF'
+    ? await buildRemoteStatus(c,{advanceBaseline:false})
+    : await buildRemoteStatusProtected(c,{advanceBaseline:false});
   const candidates=[...pending.remoteNew.map(x=>({...x,status:'REMOTE NEW'})),...pending.remoteChanged.map(x=>({...x,status:'REMOTE CHANGED'})),...pending.remoteDeleted.map(x=>({...x,status:'REMOTE DELETED'}))];
   const allowed=new Map(Array.isArray(actions)?actions.map(x=>[String(x.path),x]):[]);
   if(!confirm) return {requiresConfirmation:true,connection:c.name,summary:{remoteNew:pending.remoteNew.length,remoteUntracked:pending.remoteUntracked.length,remoteChanged:pending.remoteChanged.length,remoteDeleted:pending.remoteDeleted.length,conflicts:pending.conflicts.length},files:candidates,remoteUntracked:pending.remoteUntracked,conflicts:pending.conflicts,message:candidates.length?'No local files were changed. Review each remote change and call remote sync again with explicit per-file actions (sync or keep) and confirm=true.':'No remote changes need syncing.'};
@@ -580,11 +627,17 @@ async function remoteSync(c, actions, confirm){
       const local=localPathForRel(item.path);
       if(item.status==='REMOTE DELETED'){
         if(action.confirmation!=='DELETE_LOCAL') throw new Error('Syncing REMOTE DELETED requires confirmation value DELETE_LOCAL.');
+        if(protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'localBackups')){
+          await copyLocalBackup(item.path,'remote-deleted');
+        }
         await fsp.rm(local,{force:true});
         const manifest=await loadManifest(); delete manifest[item.path]; await saveManifest(manifest);
       } else {
         if(item.status==='REMOTE CHANGED' && action.confirmation!=='OVERWRITE_LOCAL') throw new Error('Syncing REMOTE CHANGED requires confirmation value OVERWRITE_LOCAL.');
-        const hash=await downloadOne(c,item.remote,item.path,true);
+        if(item.status==='REMOTE CHANGED' && protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'localBackups')){
+          await copyLocalBackup(item.path,'remote-overwritten');
+        }
+        const hash=await retryOperation(()=>downloadOne(c,item.remote,item.path,true),transferAttempts(c));
         const manifest=await loadManifest(); manifest[item.path]=hash; await saveManifest(manifest);
       }
       synced.push(item.path);
@@ -821,7 +874,7 @@ async function initializeWorkspaceFromHost(c, mappings, confirm){
   };
 }
 
-async function deploy(c, confirm, deletionActions=[]) {
+async function deploy(c, confirm, deletionActions=[], confirmation='') {
   const plan=await buildPlan(c);
   const uploadItems=plan.filter(x=>x.status==='NEW'||x.status==='CHANGED');
   const deletedItems=plan.filter(x=>x.status==='DELETED');
@@ -842,6 +895,18 @@ async function deploy(c, confirm, deletionActions=[]) {
       : 'No files were uploaded. Review the plan, then call deploy again with confirm=true after explicit user confirmation.'
   };
 
+  const protection = normalizeSettings(c.settings);
+  const overwriteTargets = uploadItems.filter(x=>x.status==='CHANGED');
+  if (protectionEnabled(c,'overwriteConfirmation') && overwriteTargets.length &&
+      String(confirmation||'').toUpperCase()!=='OVERWRITE') {
+    return {
+      requiresConfirmation:true,
+      protectionConfirmation:'OVERWRITE',
+      summary,
+      message:'Protection requires the confirmation keyword OVERWRITE because one or more local CHANGED files will overwrite existing hosting files. No hosting changes were made.'
+    };
+  }
+
   const manifest=await loadManifest();
   const uploaded=[]; const failed=[]; const restored=[]; const restoreFailed=[]; const deleted=[]; const deleteFailed=[]; const kept=[];
   const actionMap=new Map(Array.isArray(deletionActions)?deletionActions.map(x=>[String(x.path),x]):[]);
@@ -850,8 +915,11 @@ async function deploy(c, confirm, deletionActions=[]) {
     try{
       const remote=remoteFromRel(c,item.relativePath);
       if(!allowedRemote(c,remote)) throw new Error('Remote path is outside configured folders.');
+      if(item.status==='CHANGED' && protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'remoteBackups')){
+        await retryOperation(()=>remoteBackup(c,remote,item.relativePath,'remote-overwritten'),transferAttempts(c));
+      }
       await ensureRemoteDir(c,path.posix.dirname(remote));
-      await apiUpload(c,path.posix.dirname(remote),item.localPath);
+      await retryOperation(()=>apiUpload(c,path.posix.dirname(remote),item.localPath),transferAttempts(c));
       manifest[item.relativePath]=item.hash;
       await saveManifest(manifest);
       uploaded.push(item.relativePath);
@@ -871,6 +939,9 @@ async function deploy(c, confirm, deletionActions=[]) {
         restored.push(item.relativePath);
       } else if(action.action==='delete') {
         if(String(action.confirmation||'')!=='DELETE') throw new Error('Remote deletion requires confirmation value DELETE.');
+        if(protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'remoteBackups')){
+          await retryOperation(()=>remoteBackup(c,remote,item.relativePath,'local-deleted'),transferAttempts(c));
+        }
         await api2FileOp(c,'trash',remote);
         delete manifest[item.relativePath];
         await saveManifest(manifest);
@@ -943,8 +1014,8 @@ const TOOLS=[ {name:'cpanel_get_settings',description:'Get per-connection Protec
  {name:'cpanel_workspace_setup',description:'Safely initialize a local workspace from selected remote cPanel folders. This mode only writes into missing or genuinely empty local folders and never overwrites existing project files.',inputSchema:{type:'object',properties:{name:{type:'string'},mappings:{type:'array',items:{type:'object',properties:{local:{type:'string'},remote:{type:'string'},enabled:{type:'boolean'}},required:['local','remote']}},confirm:{type:'boolean'}},required:['name','mappings','confirm']}},
  {name:'cpanel_workspace_state',description:'Read-only check of the current local workspace state. Call this before onboarding or changing mappings.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}},
  {name:'cpanel_deploy_plan',description:'Build a local deployment plan. Never modifies hosting.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}},
- {name:'cpanel_deploy',description:'Deploy NEW and CHANGED files. DELETED local files are never deleted remotely automatically; provide explicit per-file actions restore, delete (requires confirmation DELETE), or keep.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'},deletionActions:{type:'array',items:{type:'object',properties:{path:{type:'string'},action:{type:'string',enum:['restore','delete','keep']},confirmation:{type:'string'}},required:['path','action']}}},required:['name','confirm']}},
- {name:'cpanel_local_upload',description:'Explicit full local-to-remote upload. Overwrites existing remote files and adds new local files after explicit confirmation.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'}},required:['name','confirm']}},
+ {name:'cpanel_deploy',description:'Deploy NEW and CHANGED files. Protection may require OVERWRITE for CHANGED files. DELETED local files are never deleted remotely automatically; provide explicit per-file actions restore, delete (requires confirmation DELETE), or keep.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'},confirmation:{type:'string'},deletionActions:{type:'array',items:{type:'object',properties:{path:{type:'string'},action:{type:'string',enum:['restore','delete','keep']},confirmation:{type:'string'}},required:['path','action']}}},required:['name','confirm']}},
+ {name:'cpanel_local_upload',description:'Explicit full local-to-remote upload. Protection may require OVERWRITE when existing hosting files will be replaced; new local files are added after confirmation.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'},confirmation:{type:'string'}},required:['name','confirm']}},
  {name:'cpanel_remote_status',description:'Read-only remote-to-local comparison. Detect REMOTE NEW, REMOTE CHANGED, and REMOTE DELETED using a saved remote metadata baseline. Never modifies local files except the remote metadata observation file.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}},
  {name:'cpanel_remote_sync',description:'Synchronize explicitly selected remote changes into the local workspace. REMOTE CHANGED requires OVERWRITE_LOCAL confirmation; REMOTE DELETED requires DELETE_LOCAL confirmation.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'},actions:{type:'array',items:{type:'object',properties:{path:{type:'string'},action:{type:'string',enum:['sync','keep']},confirmation:{type:'string'}},required:['path','action']}}},required:['name','confirm']}},
  {name:'cpanel_download',description:'Explicitly download configured remote folders. This can overwrite local files; use only when the user explicitly requests a download/restore.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}}
@@ -977,7 +1048,7 @@ async function callTool(name,a){
   if(name==='cpanel_deploy_plan'){const c=await getConnection(a.name);const plan=await buildPlan(c);return {connection:c.name,summary:{new:plan.filter(x=>x.status==='NEW').length,changed:plan.filter(x=>x.status==='CHANGED').length,unchanged:plan.filter(x=>x.status==='UNCHANGED').length,deleted:plan.filter(x=>x.status==='DELETED').length},files:plan.filter(x=>x.status!=='UNCHANGED').map(x=>({status:x.status,path:x.relativePath,size:x.size}))};}
   if(name==='cpanel_deploy'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);const plan=await buildPlan(c);const accepted=[];if(st.protectionMode!=='OFF'&&protectionEnabled(c,'acceptedAutomatic')){for(const x of plan.filter(x=>x.status==='CHANGED'||x.status==='NEW')){const ac=await getAccepted(c,x.relativePath);if(ac?.side==='LOCAL')accepted.push(x);}}
     if(st.autoDeploy&&accepted.length){const actions=accepted.map(x=>({path:x.relativePath,auto:true}));if(!a.confirm){return {requiresConfirmation:false,autoAccepted:true,warning:protectionWarning(c),acceptedLocal:actions,message:'Auto Deploy is ON. Accepted Local files will be uploaded when the deploy command is manually invoked.'};}}
-    const r=await deploy(c,Boolean(a.confirm)||Boolean(st.autoDeploy&&accepted.length),a.deletionActions||[]);if(st.protectionMode==='OFF') return r;if(r && accepted.length)r.acceptedLocal=accepted.map(x=>x.relativePath);r.protection=protectionWarning(c);return r;}
+    const r=await deploy(c,Boolean(a.confirm)||Boolean(st.autoDeploy&&accepted.length),a.deletionActions||[],a.confirmation||'');if(st.protectionMode==='OFF') return r;if(r && accepted.length)r.acceptedLocal=accepted.map(x=>x.relativePath);r.protection=protectionWarning(c);return r;}
   if(name==='cpanel_local_upload'){
     const c=await getConnection(a.name);
     const files=[];
@@ -985,8 +1056,20 @@ async function callTool(name,a){
       async function walk(dir){ for(const ent of await fsp.readdir(dir,{withFileTypes:true})){ const full=path.join(dir,ent.name); const rel=relativePosix(full); if(excluded(rel,c.exclude)) continue; if(ent.isDirectory()){await walk(full);continue;} const remote=remoteFromRel(c,rel); files.push({path:rel,remote,size:ent.size}); }}
       await walk(root); }
     if(!a.confirm) return {requiresConfirmation:true,connection:c.name,count:files.length,files,message:'FULL LOCAL → HOSTING upload. Existing remote files with the same paths will be overwritten; new local files will be added; remote-only files will not be deleted. No changes were made.'};
+    if(protectionEnabled(c,'overwriteConfirmation')){
+      const remoteFiles=await listRemoteFiles(c);
+      const overwriteTargets=files.filter(f=>remoteFiles.has(f.remote));
+      if(overwriteTargets.length && String(a.confirmation||'').toUpperCase()!=='OVERWRITE'){
+        return {requiresConfirmation:true,protectionConfirmation:'OVERWRITE',connection:c.name,count:files.length,overwriteCount:overwriteTargets.length,overwriteFiles:overwriteTargets.map(x=>x.path),message:'Protection requires the confirmation keyword OVERWRITE because this full upload will overwrite existing hosting files. No hosting changes were made.'};
+      }
+    }
     const manifest=await loadManifest(),uploaded=[],failed=[];
-    for(const f of files){try{await ensureRemoteDir(c,path.posix.dirname(f.remote));await apiUpload(c,path.posix.dirname(f.remote),path.join(WORKSPACE,...f.path.split('/')));manifest[f.path]=sha256(path.join(WORKSPACE,...f.path.split('/')));await saveManifest(manifest);uploaded.push(f.path);}catch(e){failed.push({path:f.path,error:e.message});}}
+    for(const f of files){try{
+      if(protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'remoteBackups')){
+        const remoteFiles=await listRemoteFiles(c);
+        if(remoteFiles.has(f.remote)) await retryOperation(()=>remoteBackup(c,f.remote,f.path,'remote-overwritten'),transferAttempts(c));
+      }
+      await ensureRemoteDir(c,path.posix.dirname(f.remote));await retryOperation(()=>apiUpload(c,path.posix.dirname(f.remote),path.join(WORKSPACE,...f.path.split('/'))),transferAttempts(c));manifest[f.path]=sha256(path.join(WORKSPACE,...f.path.split('/')));await saveManifest(manifest);uploaded.push(f.path);}catch(e){failed.push({path:f.path,error:e.message});}}
     return {requiresConfirmation:false,connection:c.name,uploaded,failed,message:`Full upload completed: ${uploaded.length} uploaded, ${failed.length} failed.`};
   }
   if(name==='cpanel_remote_status'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);if(st.protectionMode==='OFF') return await buildRemoteStatus(c);const r=await buildRemoteStatusProtected(c);r.protection=protectionWarning(c);return r;}
