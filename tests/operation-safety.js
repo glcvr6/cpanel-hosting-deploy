@@ -6,6 +6,11 @@ assert(s.includes("async function api2FileOp(c,op,sourcefiles)"),'remote delete 
 assert(s.includes("cpanel_jsonapi_apiversion','2'"),'API2 version missing');
 assert(s.includes("async function withOperationLock(c,operation,fn)"),'operation lock helper missing');
 assert(s.includes("async function atomicJsonWrite(file,value)"),'atomic JSON writer missing');
+assert(s.includes("async function withFileLock(lockPath,operation,fn)"),'shared file lock helper missing');
+assert(s.includes("lockId:crypto.randomUUID()"),'lock ownership token missing');
+assert(s.includes("current.lockId===owner.lockId"),'lock release must verify ownership before unlinking');
+assert(s.includes("async function withProtectionStateLock(fn)"),'protection state lock missing');
+assert(s.includes("return await withProtectionStateLock(async()=>"),'accepted state mutation must be serialized');
 assert(s.includes("await fsp.rename(tmp,file)"),'atomic JSON writer must replace state via rename');
 assert(s.includes("Protection state is unreadable or corrupted"),'corrupt protection state must fail closed');
 assert(s.includes("saveRemotePending(x){ await atomicJsonWrite") || s.includes("saveRemotePending(x){await atomicJsonWrite") || s.includes("async function saveRemotePending(x){ await atomicJsonWrite"),'pending state must use atomic JSON writes');
@@ -24,5 +29,5 @@ assert(s.includes("api2FileOp(c,'trash',item.path)"),'remote backup retention mu
 assert(s.includes("withOperationLock(c,'deploy'"),'deploy lock missing');
 assert(s.includes("withOperationLock(c,'remote-sync'"),'remote sync lock missing');
 assert(s.includes("withOperationLock(c,'workspace-setup'"),'workspace setup lock missing');
-assert(s.includes("const VERSION = '1.11.4';"),'server version must match the current release');
+assert(s.includes("const VERSION = '1.11.5';"),'server version must match the current release');
 console.log('Operation safety regression: PASS');
