@@ -271,6 +271,7 @@ function excluded(rel, list){
   let normalizedRel=String(rel||'').replaceAll('\\','/');
   while(normalizedRel.startsWith('/')) normalizedRel=normalizedRel.slice(1);
   while(normalizedRel.endsWith('/')) normalizedRel=normalizedRel.slice(0,-1);
+  if(normalizedRel.startsWith('./')) normalizedRel=normalizedRel.slice(2);
 
   const normalizedRelLower=normalizedRel.toLowerCase();
   const parts=normalizedRelLower.split('/').filter(Boolean);
