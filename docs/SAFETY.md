@@ -28,6 +28,14 @@ These actions should be tested only with recoverable data.
 
 Protection workflows can create local or remote backups before destructive operations. Backup retention is configurable. Backup failures are treated as safety events rather than silently ignored.
 
+## State, locking, and crash recovery
+
+Persisted JSON state is written atomically using a temporary file followed by replacement. Shared read-modify-write transactions use dedicated file locks. Stale locks can be recovered only when their recorded owner process is no longer alive, and lock cleanup verifies an ownership token before removing a lock.
+
+Corrupt or unreadable persisted state fails closed rather than silently resetting safety decisions. Remote actions that depend on an earlier observation are revalidated immediately before the sensitive operation. Partial-success synchronization advances only the portion of the baseline that actually completed.
+
+A crash can still leave an operation at a recoverable intermediate point—for example, a remote upload may complete before its manifest update. The next planning/status pass is expected to reconcile the observable state. The implementation is designed to avoid silently treating an incomplete transaction as fully successful.
+
 ## Testing rule
 
 Use a dedicated non-production cPanel account for Protection testing. Never use customer production data as a test fixture.
