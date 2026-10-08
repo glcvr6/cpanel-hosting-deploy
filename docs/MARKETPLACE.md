@@ -25,4 +25,4 @@ The distributed package must not contain:
 
 v1.11.3 should be presented accurately
 
-The 1.11.1 patch also fixes workspace resolution for Marketplace-installed MCP servers: Protection is implemented and configurable, while systematic real-world Protection testing is the next development phase. The project welcomes controlled community testing.
+The 1.11.3 patch also fixes workspace resolution for Marketplace-installed MCP servers: Protection is implemented and configurable, while systematic real-world Protection testing is the next development phase. The project welcomes controlled community testing.
