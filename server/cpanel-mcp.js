@@ -8,7 +8,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
-const VERSION = '1.12.0';
+const VERSION = '1.13.0';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];
