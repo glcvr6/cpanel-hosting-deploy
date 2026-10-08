@@ -576,8 +576,20 @@ async function cleanupRemoteBackups(c){
 }
 async function remoteBackup(c,remotePath,rel,suffix){
   const tmp=path.join(os.tmpdir(),`cpanel-backup-${crypto.randomUUID()}`); await fsp.mkdir(tmp,{recursive:true});
-  const localTmp=path.join(tmp,path.basename(remotePath));
-  try{ const u=new URL(`${c.host}/download`);u.searchParams.set('file',remotePath);const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});if(!r.ok)throw new Error(`Remote backup download failed HTTP ${r.status}`);await fsp.writeFile(localTmp,Buffer.from(await r.arrayBuffer()));await ensureRemoteDir(c,`${remoteBackupRoot()}/${path.posix.dirname(rel)}`);await apiUpload(c,`${remoteBackupRoot()}/${path.posix.dirname(rel)}`,localTmp);await cleanupRemoteBackups(c);return normalizeRemote(`${remoteBackupRoot()}/${rel}.${suffix}.backup`);}finally{await fsp.rm(tmp,{recursive:true,force:true}).catch(()=>{});}}
+  const backupName=`${path.basename(rel)}.${suffix}.${Date.now()}.${crypto.randomUUID()}.backup`;
+  const localTmp=path.join(tmp,backupName);
+  const remoteDir=normalizeRemote(`${remoteBackupRoot()}/${path.posix.dirname(rel)}`);
+  try{
+    const u=new URL(`${c.host}/download`);u.searchParams.set('file',remotePath);
+    const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});
+    if(!r.ok)throw new Error(`Remote backup download failed HTTP ${r.status}`);
+    await fsp.writeFile(localTmp,Buffer.from(await r.arrayBuffer()));
+    await ensureRemoteDir(c,remoteDir);
+    await apiUpload(c,remoteDir,localTmp);
+    await cleanupRemoteBackups(c);
+    return normalizeRemote(`${remoteDir}/${backupName}`);
+  }finally{await fsp.rm(tmp,{recursive:true,force:true}).catch(()=>{});}
+}
 async function requireKeyword(action,provided,enabled=true){if(!enabled)return; if(String(provided||'').toUpperCase()!==action)throw new Error(`This operation requires confirmation keyword ${action}.`);}
 async function verifyRemoteContent(c,rp,localFile){const rh=await remoteSha256(c,rp);if(rh===null)return {ok:false,missing:true};const lh=sha256(localFile);return {ok:rh===lh,localHash:lh,remoteHash:rh};}
 async function retryOperation(fn,attempts){let last;for(let i=0;i<attempts;i++){try{return await fn(i+1);}catch(e){last=e;if(i===attempts-1)throw e;}}throw last;}
