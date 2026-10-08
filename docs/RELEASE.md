@@ -4,26 +4,69 @@
 
 The project follows semantic versioning in the form `MAJOR.MINOR.PATCH`.
 
-The plugin version should remain consistent across:
+The plugin version must remain consistent across:
 
 - `.cursor-plugin/plugin.json`;
 - `package.json`;
-- release notes/changelog;
-- documentation where a version is explicitly referenced.
+- `server/cpanel-mcp.js`;
+- `CHANGELOG.md`;
+- README/release documentation where the version is explicitly referenced.
+
+## Current release: v1.13.2
+
+v1.13.2 is a reliability and runtime-correctness release on top of the 1.11.x–1.13.x safety hardening series.
+
+### Headline changes
+
+- Transactional deployment-manifest locking.
+- Atomic first-run connections-store creation.
+- Crash-safe persisted JSON state.
+- Stale-lock detection and ownership-safe lock cleanup.
+- Remote snapshot revalidation before sensitive actions.
+- Local workspace/path and symlink protection.
+- Bounded cPanel API requests.
+- Unique remote backup naming and retention.
+- Explicit download runtime fix removing a stale manifest write.
+
+### Validation status
+
+The release CI validates:
+
+- Node.js 20;
+- Node.js 22;
+- JavaScript syntax;
+- plugin metadata/structure;
+- package version metadata.
+
+The latest release PR (#18) completed CI successfully before merge.
 
 ## Release checklist
 
-1. Update version metadata.
+1. Confirm all version fields agree.
 2. Update `CHANGELOG.md`.
-3. Update user-facing documentation.
-4. Run `node --check server/cpanel-mcp.js`.
-5. Run `node tests/validate-plugin.js`.
-6. Review the repository for credentials/secrets.
-7. Confirm the ZIP/package contains only intended files.
-8. Commit to `main`.
-9. Create a GitHub release/tag.
-10. Publish release notes that distinguish implemented behavior from behavior still under testing.
+3. Update README and user-facing documentation.
+4. Review safety/recovery documentation.
+5. Run `node --check server/cpanel-mcp.js`.
+6. Run `node tests/validate-plugin.js`.
+7. Review repository contents for credentials/secrets.
+8. Confirm no generated local state is included.
+9. Confirm CI is green on Node.js 20 and 22.
+10. Merge the release-preparation changes to `main`.
+11. Create the GitHub tag/release using the exact version.
+12. Publish release notes that distinguish implemented behavior from behavior still under real-world testing.
 
-## v1.11.0 release position
+## Release notes guidance
 
-Protection is implemented in v1.11.0. The project deliberately labels systematic real-world Protection testing as the next development phase. This avoids overstating the maturity of new safety policies while making the implementation available for controlled testing.
+Do not claim that Protection has been exhaustively validated on every cPanel environment. The implementation is present and regression-tested, while broader real-world testing remains an explicit project goal.
+
+For release assets, distribute only the intended plugin/package contents. Never include API tokens, passwords, cookies/session data, private keys, customer files, generated `.hosting` state, or local test fixtures containing secrets.
+
+## Rollback
+
+If a release introduces a regression:
+
+1. Stop recommending the affected version.
+2. Identify the last known-good tag.
+3. Reproduce the failure on disposable data.
+4. Fix and regression-test the issue.
+5. Publish a patch release rather than rewriting a published release.

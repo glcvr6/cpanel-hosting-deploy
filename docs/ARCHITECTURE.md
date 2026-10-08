@@ -34,6 +34,26 @@ Remote status additionally distinguishes:
 - `REMOTE UNTRACKED` — remote file exists outside the tracked local baseline;
 - `CONFLICT` — local and remote both diverged from the shared baseline.
 
+## Persisted state and concurrency
+
+The plugin uses several local state files under the workspace `.hosting` directory. State writes use atomic temporary-file replacement. Read-modify-write transactions that can be touched by concurrent MCP processes are serialized with dedicated locks.
+
+Important protected state includes:
+
+- `connections.json` for shared connection configuration;
+- `manifest.json` for local deployment baselines;
+- remote baseline metadata;
+- Protection accepted-state data;
+- operation and state lock files.
+
+Locks record ownership metadata and can recover stale locks when the recorded process is no longer alive. Lock cleanup verifies ownership so a process cannot remove a replacement lock created by another process.
+
+## Remote safety and recovery
+
+Remote status snapshots carry size/mtime metadata through planning. Before sensitive overwrite, restore, delete, or synchronization actions, the live remote state is revalidated against the decision snapshot. A mismatch fails closed instead of silently acting on newer remote content.
+
+Partial synchronization updates the remote baseline only for files that were successfully synchronized. Interrupted operations therefore remain detectable rather than being marked successful prematurely.
+
 ## Protection layer
 
 v1.11.0 adds a policy layer around the existing core workflows:
