@@ -8,7 +8,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
-const VERSION = '1.11.7';
+const VERSION = '1.11.8';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];
@@ -464,6 +464,18 @@ function remoteMetaEqual(a,b){
   const bm=b.mtime == null ? null : String(b.mtime);
   return as===bs && am===bm;
 }
+async function verifyRemoteSnapshot(c,remotePath,expected,shouldExist=true){
+  const current=await listRemoteFiles(c);
+  const actual=current.get(remotePath);
+  if(shouldExist){
+    if(!actual) throw new Error(`Remote file changed since the deployment/sync decision: ${remotePath} no longer exists.`);
+    if(!expected) throw new Error(`Remote file state could not be verified safely: ${remotePath}`);
+    if(!remoteMetaEqual(expected,actual)) throw new Error(`Remote file changed since the deployment/sync decision: ${remotePath}`);
+  } else if(actual){
+    throw new Error(`Remote file changed since the deployment/sync decision: ${remotePath} now exists.`);
+  }
+  return actual;
+}
 function relFromRemote(c,rp){
   const x=normalizeRemote(rp);
   const m=(c.mappings||[]).find(m=>m.enabled!==false && (x===normalizeRemote(m.remote) || x.startsWith(normalizeRemote(m.remote)+'/')));
@@ -473,20 +485,13 @@ function relFromRemote(c,rp){
 }
 function localPathForRel(rel){return path.join(WORKSPACE,...String(rel).split('/'));}
 
-async function remotePendingPath(){ return path.join(WORKSPACE,'.hosting','remote-pending.json'); }
-async function loadRemotePending(){
-  try { const x=JSON.parse(await fsp.readFile(await remotePendingPath(),'utf8')); return x && typeof x==='object'?x:null; }
-  catch(_){ return null; }
-}
+// Remote sync always revalidates the live remote inventory before acting.
 async function atomicJsonWrite(file,value){
   const dir=path.dirname(file); await fsp.mkdir(dir,{recursive:true});
   const tmp=path.join(dir,'.'+path.basename(file)+'.'+process.pid+'.'+crypto.randomUUID()+'.tmp');
   try{ await fsp.writeFile(tmp,JSON.stringify(value,null,2),'utf8'); await fsp.rename(tmp,file); }
   finally{ await fsp.rm(tmp,{force:true}).catch(()=>{}); }
 }
-async function saveRemotePending(x){ await atomicJsonWrite(await remotePendingPath(),x); }
-async function clearRemotePending(){ try{await fsp.unlink(await remotePendingPath());}catch(_){} }
-
 
 function protectionStatePath(){return path.join(WORKSPACE,'.hosting','protection-state.json');}
 async function loadProtectionState(){
@@ -683,8 +688,6 @@ async function buildRemoteStatus(c, options={}){
 
   const hasDifferences = remoteNew.length||remoteUntracked.length||remoteChanged.length||remoteDeleted.length||conflicts.length;
   if(advanceBaseline && !hasDifferences) await saveRemoteMeta(current);
-  const pending={createdAt:new Date().toISOString(),connection:c.name,remoteNew,remoteUntracked,remoteChanged,remoteDeleted,conflicts};
-  await saveRemotePending(pending);
   return {
     connection:c.name,
     baselineInitialized:!hadBaseline,
@@ -745,8 +748,6 @@ async function buildRemoteStatusProtected(c, options={}){
   // If every tracked pair is confirmed identical, the current state is safe to accept.
   const hasDifferences = remoteNew.length||remoteChanged.length||remoteDeleted.length||conflicts.length;
   if(advanceBaseline && (!hasDifferences || (!remoteChanged.length && !remoteDeleted.length && !conflicts.length))) await saveRemoteMeta(current);
-  const pending={createdAt:new Date().toISOString(),connection:c.name,remoteNew,remoteUntracked,remoteChanged,remoteDeleted,conflicts};
-  await saveRemotePending(pending);
   return {
     connection:c.name,
     baselineInitialized:!hadBaseline,
@@ -783,12 +784,14 @@ async function remoteSync(c, actions, confirm){
       const local=localPathForRel(item.path);
       if(item.status==='REMOTE DELETED'){
         if(action.confirmation!=='DELETE_LOCAL') throw new Error('Syncing REMOTE DELETED requires confirmation value DELETE_LOCAL.');
+        await verifyRemoteSnapshot(c,item.remote,null,false);
         if(protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'localBackups')){
           await copyLocalBackup(c,item.path,'remote-deleted');
         }
         await fsp.rm(local,{force:true});
         const manifest=await loadManifest(); delete manifest[item.path]; await saveManifest(manifest);
       } else {
+        await verifyRemoteSnapshot(c,item.remote,{size:item.size,mtime:item.mtime},true);
         if(item.status==='REMOTE CHANGED' && action.confirmation!=='OVERWRITE_LOCAL') throw new Error('Syncing REMOTE CHANGED requires confirmation value OVERWRITE_LOCAL.');
         if(item.status==='REMOTE CHANGED' && protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'localBackups')){
           await copyLocalBackup(c,item.path,'remote-overwritten');
@@ -820,7 +823,6 @@ async function remoteSync(c, actions, confirm){
     }
   }
   await saveRemoteMeta(nextBaseline);
-  await clearRemotePending();
   return {requiresConfirmation:false,connection:c.name,synced,kept,failed,conflicts:pending.conflicts,summary:{remoteNew:pending.remoteNew.length,remoteUntracked:pending.remoteUntracked.length,remoteChanged:pending.remoteChanged.length,remoteDeleted:pending.remoteDeleted.length,conflicts:pending.conflicts.length},message:`Synced ${synced.length} remote change(s); kept ${kept.length}; failed ${failed.length}.`};
   });
 }
@@ -908,7 +910,7 @@ async function buildPlan(c){
             }
           }
         }
-        out.push({relativePath:rel,localPath:full,hash,status,size:ent.size,mapping:{local:m.local,remote:m.remote}});
+        out.push({relativePath:rel,localPath:full,hash,status,size:ent.size,remoteInfo:remoteFiles?.get(remoteFromRel(c,rel))||null,mapping:{local:m.local,remote:m.remote}});
       }
     }
     await walk(root);
@@ -926,7 +928,7 @@ async function buildPlan(c){
     if (!mapped) continue;
     const remote = remoteFromRel(c, rel);
     if (remoteFilesForDeleted.has(remote)) {
-      out.push({relativePath:rel, localPath:path.join(WORKSPACE,...rel.split('/')), hash:null, status:'DELETED', size:0, mapping:mappingForLocal(c, rel)});
+      out.push({relativePath:rel, localPath:path.join(WORKSPACE,...rel.split('/')), hash:null, status:'DELETED', size:0, remoteInfo:remoteFilesForDeleted.get(remote), mapping:mappingForLocal(c, rel)});
     }
   }
   if(manifestChanged) await saveManifest(manifest);
@@ -1095,6 +1097,7 @@ async function deploy(c, confirm, deletionActions=[], confirmation='') {
     try{
       const remote=remoteFromRel(c,item.relativePath);
       if(!allowedRemote(c,remote)) throw new Error('Remote path is outside configured folders.');
+      await verifyRemoteSnapshot(c,remote,item.remoteInfo,item.status==='CHANGED');
       if(item.status==='CHANGED' && protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'remoteBackups')){
         await retryOperation(()=>remoteBackup(c,remote,item.relativePath,'remote-overwritten'),transferAttempts(c));
       }
@@ -1113,12 +1116,14 @@ async function deploy(c, confirm, deletionActions=[], confirmation='') {
     if(!allowedRemote(c,remote)) { deleteFailed.push({path:item.relativePath,error:'Remote path is outside configured folders.'}); continue; }
     try {
       if(action.action==='restore') {
+        await verifyRemoteSnapshot(c,remote,item.remoteInfo,true);
         const hash=await downloadOne(c,remote,item.relativePath,true);
         manifest[item.relativePath]=hash;
         await saveManifest(manifest);
         restored.push(item.relativePath);
       } else if(action.action==='delete') {
         if(String(action.confirmation||'')!=='DELETE') throw new Error('Remote deletion requires confirmation value DELETE.');
+        await verifyRemoteSnapshot(c,remote,item.remoteInfo,true);
         if(protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'remoteBackups')){
           await retryOperation(()=>remoteBackup(c,remote,item.relativePath,'local-deleted'),transferAttempts(c));
         }
