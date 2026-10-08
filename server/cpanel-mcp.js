@@ -260,10 +260,36 @@ function relativePosix(full){
   if (rel.startsWith('../') || rel==='..' || path.isAbsolute(rel)) throw new Error(`Path outside workspace: ${full}`);
   return rel;
 }
+function normalizeExcludePath(value){
+  return String(value||'')
+    .trim()
+    .replaceAll('\\\\','/')
+    .replace(/^\\/+|\\/+$/g,'')
+    .replace(/^\.\\//,'')
+    .toLowerCase();
+}
 function excluded(rel, list){
-  const parts=rel.replaceAll('\\','/').split('/');
-  if (list.some(x=>parts.some(p=>p.toLowerCase()===String(x).replaceAll('\\','/').replace(/^\/+|\/+$/g,'').toLowerCase()))) return true;
-  return path.extname(rel).toLowerCase()==='.zip';
+  const normalizedRel=String(rel||'')
+    .replaceAll('\\\\','/')
+    .replace(/^\\/+|\\/+$/g,'');
+  const normalizedRelLower=normalizedRel.toLowerCase();
+  const parts=normalizedRelLower.split('/').filter(Boolean);
+
+  for(const raw of (Array.isArray(list)?list:[])){
+    const pattern=normalizeExcludePath(raw);
+    if(!pattern) continue;
+
+    // Path excludes match the exact relative path and everything below it.
+    if(pattern.includes('/')){
+      if(normalizedRelLower===pattern || normalizedRelLower.startsWith(pattern+'/')) return true;
+      continue;
+    }
+
+    // Component excludes match a directory/file name anywhere in the path.
+    if(parts.includes(pattern)) return true;
+  }
+
+  return path.extname(normalizedRel).toLowerCase()==='.zip';
 }
 function mappingForLocal(c,rel){
   const normalized=rel.replaceAll('\\','/');
@@ -304,6 +330,9 @@ async function listRemoteFiles(c) {
       if (!nm) continue;
       const rp = normalizeRemote(`${dir}/${nm}`);
       const type = String(item.type || '').toLowerCase();
+
+      const rel = relFromRemote(c, rp);
+      if (!rel || excluded(rel, c.exclude)) continue;
 
       if (type === 'dir' || type === 'directory') {
         if (allowedRemote(c, rp)) await walk(rp);
