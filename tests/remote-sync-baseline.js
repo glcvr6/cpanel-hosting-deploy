@@ -13,5 +13,8 @@ const block=source.slice(start,end);
 
 if(!block.includes("buildRemoteStatus(c,{advanceBaseline:false})")) throw Error('OFF sync refresh must not advance baseline');
 if(!block.includes("buildRemoteStatusProtected(c,{advanceBaseline:false})")) throw Error('protected sync refresh must not advance baseline');
-if(!block.includes("await saveRemoteMeta(await listRemoteFiles(c).then")) throw Error('successful sync must still advance baseline after actions');
+if(!block.includes("const previousBaseline=await loadRemoteMeta();")) throw Error('sync must load previous baseline');
+if(!block.includes("const nextBaseline={...previousBaseline};")) throw Error('sync must preserve previous baseline');
+if(!block.includes("await saveRemoteMeta(nextBaseline);")) throw Error('successful sync must advance baseline selectively');
+if(block.includes("saveRemoteMeta(await listRemoteFiles(c).then")) throw Error('sync must not replace baseline with full current inventory');
 console.log('Remote sync baseline preservation: PASS');

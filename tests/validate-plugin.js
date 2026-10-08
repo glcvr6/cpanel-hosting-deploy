@@ -15,4 +15,5 @@ cp.execFileSync(process.execPath,[path.join(root,'tests/remote-sync-baseline.js'
 cp.execFileSync(process.execPath,[path.join(root,'tests/protection-overwrite.js')],{stdio:'inherit'});
 cp.execFileSync(process.execPath,[path.join(root,'tests/protection-backups.js')],{stdio:'inherit'});
 cp.execFileSync(process.execPath,[path.join(root,'tests/transfer-retry.js')],{stdio:'inherit'});
+cp.execFileSync(process.execPath,[path.join(root,'tests/partial-success-baseline.js')],{stdio:'inherit'});
 console.log('cPanel Hosting Deploy 1.11.1 validation: PASS');

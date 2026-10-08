@@ -643,7 +643,27 @@ async function remoteSync(c, actions, confirm){
       synced.push(item.path);
     }catch(e){failed.push({path:item.path,error:e.message});}
   }
-  await saveRemoteMeta(await listRemoteFiles(c).then(m=>Object.fromEntries([...m].map(([rp,i])=>[rp,{size:Number(i.size||0),mtime:i.mtime==null?null:String(i.mtime)}]))));
+  // Partial-success rule: advance the remote baseline only for actions that
+  // actually completed. Kept and failed changes must remain against the old
+  // baseline so they are detected again on the next status/sync operation.
+  const previousBaseline=await loadRemoteMeta();
+  const currentInventory=await listRemoteFiles(c);
+  const nextBaseline={...previousBaseline};
+  for(const item of candidates){
+    if(!synced.includes(item.path)) continue;
+    if(item.status==='REMOTE DELETED'){
+      delete nextBaseline[item.remote];
+      continue;
+    }
+    const info=currentInventory.get(item.remote);
+    if(info){
+      nextBaseline[item.remote]={
+        size:Number(info.size||0),
+        mtime:info.mtime==null?null:String(info.mtime)
+      };
+    }
+  }
+  await saveRemoteMeta(nextBaseline);
   await clearRemotePending();
   return {requiresConfirmation:false,connection:c.name,synced,kept,failed,conflicts:pending.conflicts,summary:{remoteNew:pending.remoteNew.length,remoteUntracked:pending.remoteUntracked.length,remoteChanged:pending.remoteChanged.length,remoteDeleted:pending.remoteDeleted.length,conflicts:pending.conflicts.length},message:`Synced ${synced.length} remote change(s); kept ${kept.length}; failed ${failed.length}.`};
 }
