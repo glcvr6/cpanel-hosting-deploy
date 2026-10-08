@@ -535,7 +535,10 @@ async function buildRemoteStatus(c, options={}){
     if(!remoteFiles.has(rp)) remoteDeleted.push({path:rel,remote:rp});
   }
 
-undefinedeRemotePending(pending);
+  const hasDifferences = remoteNew.length||remoteUntracked.length||remoteChanged.length||remoteDeleted.length||conflicts.length;
+  if(advanceBaseline && !hasDifferences) await saveRemoteMeta(current);
+  const pending={createdAt:new Date().toISOString(),connection:c.name,remoteNew,remoteUntracked,remoteChanged,remoteDeleted,conflicts};
+  await saveRemotePending(pending);
   return {
     connection:c.name,
     baselineInitialized:!hadBaseline,
