@@ -584,6 +584,25 @@ async function withOperationLock(c,operation,fn){
 async function withProtectionStateLock(fn){
   return await withFileLock(path.join(WORKSPACE,'.hosting','protection-state.lock'),'protection-state',fn);
 }
+async function cleanupRetention(dir,limit){
+  try{
+    await fsp.mkdir(dir,{recursive:true});
+    const files=[];
+    async function walk(current){
+      for(const ent of await fsp.readdir(current,{withFileTypes:true})){
+        const full=path.join(current,ent.name);
+        if(ent.isDirectory()) await walk(full);
+        else if(ent.isFile()){
+          const st=await fsp.stat(full);
+          files.push({path:full,mtime:st.mtimeMs});
+        }
+      }
+    }
+    await walk(dir);
+    files.sort((a,b)=>b.mtime-a.mtime);
+    for(const item of files.slice(Math.max(0,Number(limit)||0))) await fsp.unlink(item.path);
+  }catch(e){log(`Retention cleanup failed: ${e.message}`);}
+}
 function acceptedStateKey(c,rel){return `${c.name}::${rel}`;}
 async function getAccepted(c,rel){const st=await loadProtectionState();return st.accepted?.[acceptedStateKey(c,rel)]||null;}
 async function setAccepted(c,rel,value){
