@@ -21,6 +21,7 @@ assert(s.includes("pidError.code==='ESRCH'"),'lock recovery must distinguish a s
 assert(s.includes("lock metadata is invalid"),'invalid lock metadata must fail closed');
 assert(s.includes("protectionEnabled(c,'locks')"),'lock protection gate missing');
 assert(s.includes("cleanupRetention(backupRoot(),normalizeSettings(c.settings).backupRetention)"),'local backup retention cleanup missing');
+assert(s.includes("const backupName=`${path.basename(rel)}.${suffix}.${Date.now()}.${crypto.randomUUID()}.backup`;"),'remote backups must use unique .backup filenames so retention can find every snapshot');
 assert(s.includes("async function walk(current)"),'local backup retention must recurse into nested backup directories');
 assert(s.includes("files.sort((a,b)=>b.mtime-a.mtime)"),'local backup retention must use modification time rather than filename order');
 assert(s.includes("async function cleanupRemoteBackups(c)"),'remote backup retention cleanup missing');
