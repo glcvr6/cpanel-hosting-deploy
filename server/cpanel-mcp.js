@@ -183,7 +183,7 @@ function normalizeLocalPath(p){
   const raw=String(p||'').trim().replaceAll('\\','/');
   if(!raw || raw==='.') throw new Error('Local folder mapping cannot be empty.');
   if(raw.includes('\\0')) throw new Error('Local folder mapping cannot contain NUL bytes.');
-  if(/^([A-Za-z]:)(?:\\/|$)/.test(raw) || raw.startsWith('//')) throw new Error('Local folder mapping must be relative to the workspace.');
+  if(/^[A-Za-z]:($|\/)/.test(raw) || raw.startsWith('//')) throw new Error('Local folder mapping must be relative to the workspace.');
   let x=raw.replace(/^\.\//,'').replace(/^\/+|\/+$/g,'');
   if(!x || x==='.') throw new Error('Local folder mapping cannot be empty.');
   if(x==='..' || x.startsWith('../') || x.includes('/../')) throw new Error('Local folder mapping cannot escape the workspace.');
