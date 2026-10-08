@@ -11,5 +11,5 @@ assert(server.includes("String(confirmation||'').toUpperCase()!=='OVERWRITE'"),'
 assert(server.includes("a.confirmation||''"),'deploy tool must pass confirmation');
 assert(server.includes("const overwriteTargets=files.filter(f=>remoteFiles.has(f.remote));"),'full upload must detect existing remote targets generically');
 assert(server.includes("overwriteFiles:overwriteTargets.map(x=>x.path)"),'full upload must report overwrite targets');
-assert(server.includes("protection may require OVERWRITE"),'tool description must document protected overwrite confirmation');
+assert(server.includes("Protection may require OVERWRITE"),'tool description must document protected overwrite confirmation');
 console.log('Protection overwrite enforcement regression: PASS');
