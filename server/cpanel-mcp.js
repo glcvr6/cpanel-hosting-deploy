@@ -243,7 +243,12 @@ async function apiGet(c,module,fn,params={}) {
   const r=await fetch(u,{headers:authHeaders(c)});
   const text=await r.text();
   let j; try{j=JSON.parse(text);}catch(_){throw new Error(`cPanel returned non-JSON response (${r.status}).`);}
-undefinedrmData();
+  if (!r.ok || j.status !== 1) throw new Error((j.errors||[]).join('; ') || `cPanel API HTTP ${r.status}`);
+  return j;
+}
+async function apiUpload(c,remoteDir,localFile) {
+  const data=await fsp.readFile(localFile);
+  const form=new FormData();
   form.append('dir',remoteDir);
   form.append('overwrite','1');
   form.append('file-1',new Blob([data]),path.basename(localFile));
@@ -255,7 +260,6 @@ undefinedrmData();
   if (j.data && Number(j.data.failed||0)>0) throw new Error(`cPanel reported ${j.data.failed} failed upload(s).`);
   return j;
 }
-
 function sha256(file){
   const h=crypto.createHash('sha256'); h.update(fs.readFileSync(file)); return h.digest('hex');
 }
@@ -1100,3 +1104,23 @@ async function callTool(name,a){
     for(const m of (c.mappings||[])){if(m.enabled===false)continue;await walk(normalizeRemote(m.remote),m.local,normalizeRemote(m.remote));}
     let next=0;const workers=Array.from({length:6},async()=>{while(true){const i=next++;if(i>=files.length)return;const {rp,rel}=files[i];try{const u=new URL(`${c.host}/download`);u.searchParams.set('file',rp);const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});if(!r.ok)throw new Error(`HTTP ${r.status}`);const b=Buffer.from(await r.arrayBuffer());const local=path.join(WORKSPACE,...rel.split('/'));await fsp.mkdir(path.dirname(local),{recursive:true});await fsp.writeFile(local,b);manifest[rel]=sha256(local);}catch(e){errors.push({path:rel,error:String(e.message||e)});}}});await Promise.all(workers);await saveManifest(manifest);return {downloaded:files.filter(x=>Object.prototype.hasOwnProperty.call(manifest,x.rel)).map(x=>x.rel),count:files.filter(x=>Object.prototype.hasOwnProperty.call(manifest,x.rel)).length,failed:errors,message:errors.length?`Download completed with ${errors.length} failed file(s).`:'Download completed successfully.',warning:'Download was explicitly requested. Existing local files may be overwritten.'};}
   throw new Error(`Unknown tool: ${name}`);
+}
+
+async function main(){
+  await bootstrapDefault();
+  let buf='';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data',chunk=>{buf+=chunk;let idx;while((idx=buf.indexOf('\n'))>=0){const line=buf.slice(0,idx);buf=buf.slice(idx+1);if(line.trim())handle(readJsonLine(line));}});
+  process.stdin.on('end',()=>{});
+}
+async function handle(req){
+  if(!req||req.jsonrpc!=='2.0'||req.id===undefined)return;
+  try{
+    if(req.method==='initialize') return result(req.id,{protocolVersion:'2024-11-05',capabilities:{tools:{}},serverInfo:{name:'cpanel-hosting-deploy',version:VERSION}});
+    if(req.method==='tools/list') return result(req.id,{tools:TOOLS});
+    if(req.method==='tools/call'){const r=await callTool(req.params.name,req.params.arguments||{});return result(req.id,{content:[{type:'text',text:JSON.stringify(r,null,2)}],structuredContent:r});}
+    if(req.method==='ping') return result(req.id,{});
+    return error(req.id,-32601,`Method not found: ${req.method}`);
+  }catch(e){return result(req.id,{content:[{type:'text',text:`ERROR: ${e.message}`}],isError:true});}
+}
+main().catch(e=>{log(e.stack||e.message);process.exit(1);});
