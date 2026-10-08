@@ -1,3 +1,11 @@
+## [1.11.9] - 2026-10-08
+
+### Fixed
+- Serialize default connection bootstrap/name synchronization and workspace mapping persistence through the connections-store lock.
+- Make first-run connections-store creation exclusive and fail closed on malformed store structure.
+- Canonicalize remote paths before enforcing remote-root boundaries, preventing `..` path escapes.
+- Do not advance the protected remote baseline when differences are present.
+
 ## [1.11.8] - 2026-10-08
 
 ### Fixed

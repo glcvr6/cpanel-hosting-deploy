@@ -18,5 +18,11 @@ assert(edit.includes("A connection with that name already exists."),'rename must
 const settings=source.slice(source.indexOf("async function updateSettings"),source.indexOf("function protectionWarning"));
 assert(settings.includes("withConnectionsStoreLock(async()=>"),'settings update must lock the full read-modify-write transaction');
 assert(settings.includes("const store=await loadStore();"),'settings update must reload store while holding the lock');
+const bootstrap=source.slice(source.indexOf("async function bootstrapDefault()"),source.indexOf("\nasync function syncDefaultFromEnv()"));
+assert(bootstrap.includes("withConnectionsStoreLock(async()=>"),'default bootstrap must lock the full store transaction');
+const sync=source.slice(source.indexOf("async function syncDefaultFromEnv()"),source.indexOf("\nconst TOOLS="));
+assert(sync.includes("withConnectionsStoreLock(async()=>"),'default name synchronization must lock the full store transaction');
+assert(source.includes("await fsp.open(CONNECTIONS_FILE,'wx')"),'first-run store creation must use exclusive file creation');
+assert(source.includes("Connections store is unreadable or corrupted:"),'malformed connections store must fail closed');
 
 console.log('Connections store concurrency regression: PASS');

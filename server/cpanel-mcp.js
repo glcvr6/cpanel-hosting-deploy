@@ -8,7 +8,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
-const VERSION = '1.11.8';
+const VERSION = '1.11.9';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];
@@ -135,13 +135,28 @@ function readJsonLine(line) {
 
 async function ensureStore() {
   await fsp.mkdir(APP_DIR, {recursive:true});
-  try { await fsp.access(CONNECTIONS_FILE); }
-  catch (_) { await fsp.writeFile(CONNECTIONS_FILE, JSON.stringify({version:1, connections:[]}, null, 2), 'utf8'); }
+  try {
+    const handle=await fsp.open(CONNECTIONS_FILE,'wx');
+    try { await handle.writeFile(JSON.stringify({version:1, connections:[]}, null, 2),'utf8'); }
+    finally { await handle.close(); }
+  } catch(e) {
+    if(e.code!=='EEXIST') throw e;
+  }
+}
+function validateStore(store){
+  if(!store || typeof store!=='object' || Array.isArray(store) || !Array.isArray(store.connections)){
+    throw new Error('Connections store is unreadable or corrupted: invalid store structure.');
+  }
+  return store;
 }
 async function loadStore() {
   await ensureStore();
   const raw = await fsp.readFile(CONNECTIONS_FILE, 'utf8');
-  return JSON.parse(raw);
+  try { return validateStore(JSON.parse(raw)); }
+  catch(e) {
+    if(e && e.message && e.message.startsWith('Connections store is unreadable or corrupted:')) throw e;
+    throw new Error('Connections store is unreadable or corrupted: '+e.message);
+  }
 }
 async function saveStore(store) {
   await atomicJsonWrite(CONNECTIONS_FILE,store);
@@ -172,9 +187,12 @@ function revealToken(cipher) {
 }
 
 function normalizeRemote(p) {
-  let x = String(p || '/').replaceAll('\\','/');
+  let x = String(p || '/').trim().replaceAll('\\','/');
+  if(x.includes('\0')) throw new Error('Remote path cannot contain NUL bytes.');
   if (!x.startsWith('/')) x = '/' + x;
   x = x.replace(/\/+/g,'/');
+  x = path.posix.normalize(x);
+  if (!x.startsWith('/')) x = '/' + x;
   if (x.length > 1) x = x.replace(/\/+$/,'');
   return x;
 }
@@ -747,7 +765,7 @@ async function buildRemoteStatusProtected(c, options={}){
   // A read-only status check never advances the remote baseline when differences exist.
   // If every tracked pair is confirmed identical, the current state is safe to accept.
   const hasDifferences = remoteNew.length||remoteChanged.length||remoteDeleted.length||conflicts.length;
-  if(advanceBaseline && (!hasDifferences || (!remoteChanged.length && !remoteDeleted.length && !conflicts.length))) await saveRemoteMeta(current);
+  if(advanceBaseline && !hasDifferences) await saveRemoteMeta(current);
   return {
     connection:c.name,
     baselineInitialized:!hadBaseline,
@@ -1039,10 +1057,12 @@ async function initializeWorkspaceFromHost(c, mappings, confirm){
     }
   }
   for(const m of normalized) await walk(m.remote,m.local,m.remote);
-  const store=await loadStore();
-  const stored=store.connections.find(x=>x.name.toLowerCase()===c.name.toLowerCase());
-  if(stored) { stored.mappings=normalized; await saveStore(store); }
-  else c.mappings=previousMappings;
+  await withConnectionsStoreLock(async()=>{
+    const store=await loadStore();
+    const stored=store.connections.find(x=>x.name.toLowerCase()===c.name.toLowerCase());
+    if(stored) { stored.mappings=normalized; await saveStore(store); }
+    else c.mappings=previousMappings;
+  });
   return {
     requiresConfirmation:false,
     initialized:true,
@@ -1153,36 +1173,37 @@ async function deploy(c, confirm, deletionActions=[], confirmation='') {
 }
 
 async function bootstrapDefault(){
-  // The plugin ships with blank Configure fields. A connection is created only
-  // when the user has explicitly supplied all required connection fields.
-  const a = configuredCredentials();
-  if (!a.host && !a.username && !a.remoteRoot && !a.apiToken) return false;
-  if (!a.host || !a.username || !a.remoteRoot || !a.apiToken) return false;
-  const store = await loadStore();
-  if (store.connections.length) return false;
-  const name = configuredConnectionName();
-  const c = validateConnectionInput({
-    name, host:a.host, username:a.username, remoteRoot:a.remoteRoot,
-    apiToken:a.apiToken, mappings:[], exclude:DEFAULT_EXCLUDE
+  return await withConnectionsStoreLock(async()=>{
+    const a = configuredCredentials();
+    if (!a.host && !a.username && !a.remoteRoot && !a.apiToken) return false;
+    if (!a.host || !a.username || !a.remoteRoot || !a.apiToken) return false;
+    const store = await loadStore();
+    if (store.connections.length) return false;
+    const name = configuredConnectionName();
+    const c = validateConnectionInput({
+      name, host:a.host, username:a.username, remoteRoot:a.remoteRoot,
+      apiToken:a.apiToken, mappings:[], exclude:DEFAULT_EXCLUDE
+    });
+    store.connections.push(c);
+    await saveStore(store);
+    log(`Created connection ${name} from explicitly configured connection fields.`);
+    return true;
   });
-  store.connections.push(c);
-  await saveStore(store);
-  log(`Created connection ${name} from explicitly configured connection fields.`);
-  return true;
 }
 
 async function syncDefaultFromEnv(){
-  // Keep the configured connection name synchronized for a single initial
-  // connection. Credentials are never printed or returned.
   try {
-    const store=await loadStore();
-    const configuredName = configuredConnectionName();
-    if (store.connections.length === 1 && store.connections[0].name === DEFAULT_CONNECTION_NAME && configuredName !== DEFAULT_CONNECTION_NAME) {
-      store.connections[0].name = configuredName;
-      await saveStore(store);
-      log(`Default connection renamed to ${configuredName} from Cursor plugin configuration.`);
-      return true;
-    }
+    return await withConnectionsStoreLock(async()=>{
+      const store=await loadStore();
+      const configuredName = configuredConnectionName();
+      if (store.connections.length === 1 && store.connections[0].name === DEFAULT_CONNECTION_NAME && configuredName !== DEFAULT_CONNECTION_NAME) {
+        store.connections[0].name = configuredName;
+        await saveStore(store);
+        log(`Default connection renamed to ${configuredName} from Cursor plugin configuration.`);
+        return true;
+      }
+      return false;
+    });
   } catch (e) { log(`Default connection rename sync skipped: ${e.message}`); }
   return false;
 }
