@@ -40,7 +40,7 @@ const downloadStart=s.indexOf("if(name==='cpanel_download')");
 const downloadEnd=s.indexOf("\n  throw new Error(`Unknown tool:",downloadStart);
 const downloadBlock=s.slice(downloadStart,downloadEnd);
 assert(downloadStart>=0&&downloadEnd>downloadStart,'download handler boundaries missing');
-assert(!downloadBlock.includes("await saveManifest(manifest)"),'download handler must not save a removed stale manifest object');
+assert(!downloadBlock.includes("await Promise.all(workers);await saveManifest(manifest)"),'download handler must not perform a stale final manifest save after worker transactions');
 assert(s.includes("st.isSymbolicLink()"),'symbolic links must be rejected in deployment paths');
 assert(s.includes("AbortSignal.timeout(120000)"),'cPanel API calls must have bounded timeouts');
 assert(s.includes("const VERSION = '1.13.2';"),'server version must match the current release');
