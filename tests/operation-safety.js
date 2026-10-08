@@ -28,5 +28,10 @@ assert(s.includes("api2FileOp(c,'trash',item.path)"),'remote backup retention mu
 assert(s.includes("withOperationLock(c,'deploy'"),'deploy lock missing');
 assert(s.includes("withOperationLock(c,'remote-sync'"),'remote sync lock missing');
 assert(s.includes("withOperationLock(c,'workspace-setup'"),'workspace setup lock missing');
-assert(s.includes("const VERSION = '1.11.9';"),'server version must match the current release');
+assert(s.includes("withOperationLock(c,'local-upload'"),'full local upload lock missing');
+assert(s.includes("withOperationLock(c,'download'"),'download lock missing');
+assert(s.includes("async function assertSafeLocalPath(target)"),'local filesystem safety helper missing');
+assert(s.includes("st.isSymbolicLink()"),'symbolic links must be rejected in deployment paths');
+assert(s.includes("AbortSignal.timeout(120000)"),'cPanel API calls must have bounded timeouts');
+assert(s.includes("const VERSION = '1.12.0';"),'server version must match the current release');
 console.log('Operation safety regression: PASS');
