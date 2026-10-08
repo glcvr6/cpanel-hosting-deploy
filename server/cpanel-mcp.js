@@ -8,7 +8,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
-const VERSION = '1.11.1';
+const VERSION = '1.11.2';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];
@@ -246,6 +246,24 @@ async function apiGet(c,module,fn,params={}) {
   if (!r.ok || j.status !== 1) throw new Error((j.errors||[]).join('; ') || `cPanel API HTTP ${r.status}`);
   return j;
 }
+async function api2FileOp(c,op,sourcefiles){
+  const u=new URL(c.host+'/json-api/cpanel');
+  u.searchParams.set('cpanel_jsonapi_user',c.username);
+  u.searchParams.set('cpanel_jsonapi_apiversion','2');
+  u.searchParams.set('cpanel_jsonapi_module','Fileman');
+  u.searchParams.set('cpanel_jsonapi_func','fileop');
+  u.searchParams.set('op',op);
+  u.searchParams.set('sourcefiles',String(sourcefiles));
+  u.searchParams.set('doubledecode','1');
+  const r=await fetch(u,{headers:authHeaders(c)});
+  const text=await r.text();
+  let j; try{j=JSON.parse(text);}catch(_){throw new Error('cPanel API 2 returned non-JSON response ('+r.status+').');}
+  const cr=j && j.cpanelresult;
+  if(!r.ok || !cr || Number(cr.event && cr.event.result)!==1) throw new Error((cr && cr.data || []).map(x=>x.err||x.reason).filter(Boolean).join('; ') || ('cPanel API 2 Fileman '+op+' failed (HTTP '+r.status+')'));
+  const failed=(cr.data||[]).filter(x=>Number(x.result)===0);
+  if(failed.length) throw new Error(failed.map(x=>x.err||x.output||'File operation failed').join('; '));
+  return j;
+}
 async function apiUpload(c,remoteDir,localFile) {
   const data=await fsp.readFile(localFile);
   const form=new FormData();
@@ -469,21 +487,64 @@ function isIgnoredProtectionPath(rel){
     p.startsWith('sync-reports/') || p.includes('/sync-reports/') ||
     p.startsWith('.cpanel-sync-backup/') || p.includes('/.cpanel-sync-backup/');
 }
-async function copyLocalBackup(rel,suffix){
+async function copyLocalBackup(c,rel,suffix){
   const src=localPathForRel(rel); if(!fs.existsSync(src)) return null;
-  const dst=path.join(backupRoot(),...String(rel).split('/'))+`.${suffix}.backup`;
+  const dst=path.join(backupRoot(),...String(rel).split('/'))+'.'+suffix+'.backup';
   await fsp.mkdir(path.dirname(dst),{recursive:true});
-  let target=dst, n=1; while(fs.existsSync(target)){target=dst.replace(/\.backup$/,`.${n++}.backup`);}
-  await fsp.copyFile(src,target); return target;
+  let target=dst, n=1; while(fs.existsSync(target)){target=dst.replace(/\.backup$/,'.'+(n++)+'.backup');}
+  await fsp.copyFile(src,target);
+  await cleanupRetention(backupRoot(),normalizeSettings(c.settings).backupRetention);
+  return target;
+}
+async function cleanupRemoteBackups(c){
+  const root=normalizeRemote(remoteBackupRoot()),files=[];
+  async function walk(dir){
+    const j=await apiGet(c,'Fileman','list_files',{dir});
+    for(const item of (j.data||[])){
+      const nm=String(item.file||item.name||''); if(!nm) continue;
+      const rp=normalizeRemote(dir+'/'+nm),type=String(item.type||'').toLowerCase();
+      if(type==='dir'||type==='directory'){await walk(rp);continue;}
+      if(nm.includes('.backup')) files.push({path:rp,mtime:item.mtime??item.modified??item.modification_time??0});
+    }
+  }
+  try{await walk(root);}catch(e){log('Remote backup retention scan failed: '+e.message);return;}
+  files.sort((a,b)=>Number(b.mtime||0)-Number(a.mtime||0));
+  for(const item of files.slice(normalizeSettings(c.settings).backupRetention)){
+    try{await retryOperation(()=>api2FileOp(c,'trash',item.path),transferAttempts(c));}
+    catch(e){log('Remote backup retention cleanup failed for '+item.path+': '+e.message);}
+  }
 }
 async function remoteBackup(c,remotePath,rel,suffix){
   const tmp=path.join(os.tmpdir(),`cpanel-backup-${crypto.randomUUID()}`); await fsp.mkdir(tmp,{recursive:true});
   const localTmp=path.join(tmp,path.basename(remotePath));
-  try{ const u=new URL(`${c.host}/download`);u.searchParams.set('file',remotePath);const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});if(!r.ok)throw new Error(`Remote backup download failed HTTP ${r.status}`);await fsp.writeFile(localTmp,Buffer.from(await r.arrayBuffer()));await ensureRemoteDir(c,`${remoteBackupRoot()}/${path.posix.dirname(rel)}`);await apiUpload(c,`${remoteBackupRoot()}/${path.posix.dirname(rel)}`,localTmp);return normalizeRemote(`${remoteBackupRoot()}/${rel}.${suffix}.backup`);}finally{await fsp.rm(tmp,{recursive:true,force:true}).catch(()=>{});}}
+  try{ const u=new URL(`${c.host}/download`);u.searchParams.set('file',remotePath);const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});if(!r.ok)throw new Error(`Remote backup download failed HTTP ${r.status}`);await fsp.writeFile(localTmp,Buffer.from(await r.arrayBuffer()));await ensureRemoteDir(c,`${remoteBackupRoot()}/${path.posix.dirname(rel)}`);await apiUpload(c,`${remoteBackupRoot()}/${path.posix.dirname(rel)}`,localTmp);await cleanupRemoteBackups(c);return normalizeRemote(`${remoteBackupRoot()}/${rel}.${suffix}.backup`);}finally{await fsp.rm(tmp,{recursive:true,force:true}).catch(()=>{});}}
 async function requireKeyword(action,provided,enabled=true){if(!enabled)return; if(String(provided||'').toUpperCase()!==action)throw new Error(`This operation requires confirmation keyword ${action}.`);}
 async function verifyRemoteContent(c,rp,localFile){const rh=await remoteSha256(c,rp);if(rh===null)return {ok:false,missing:true};const lh=sha256(localFile);return {ok:rh===lh,localHash:lh,remoteHash:rh};}
 async function retryOperation(fn,attempts){let last;for(let i=0;i<attempts;i++){try{return await fn(i+1);}catch(e){last=e;if(i===attempts-1)throw e;}}throw last;}
 function transferAttempts(c){return protectionEnabled(c,'retry') ? normalizeSettings(c.settings).retryAttempts : 1;}
+async function withOperationLock(c,operation,fn){
+  if(!protectionEnabled(c,'locks')) return await fn();
+  const dir=path.join(WORKSPACE,'.hosting');
+  const lockPath=path.join(dir,'operation.lock');
+  await fsp.mkdir(dir,{recursive:true});
+  let handle;
+  try{
+    try{handle=await fsp.open(lockPath,'wx');}
+    catch(e){
+      if(e.code==='EEXIST'){
+        let owner='another operation';
+        try{owner=(await fsp.readFile(lockPath,'utf8')).trim()||owner;}catch(_){}
+        throw new Error('Another cPanel Hosting Deploy operation is already running: '+owner);
+      }
+      throw e;
+    }
+    await handle.writeFile(JSON.stringify({operation,pid:process.pid,createdAt:new Date().toISOString()}));
+    return await fn();
+  }finally{
+    try{if(handle)await handle.close();}catch(_){}
+    try{await fsp.unlink(lockPath);}catch(_){}
+  }
+}
 async function writeReport(c,title,data){if(!protectionEnabled(c,'reports'))return null;const dir=reportRoot();await fsp.mkdir(dir,{recursive:true});const stamp=new Date().toISOString().replace(/[:.]/g,'-');let p=path.join(dir,`${stamp}-${title}.md`),n=1;while(fs.existsSync(p))p=path.join(dir,`${stamp}-${title}.${n++}.md`);await fsp.writeFile(p,`# ${title}\n\nConnection: ${c.name}\nTime: ${new Date().toISOString()}\n\n\`\`\`json\n${JSON.stringify(data,null,2)}\n\`\`\`\n`,'utf8');return p;}
 async function cleanupRetention(dir,limit){try{await fsp.mkdir(dir,{recursive:true});const files=(await fsp.readdir(dir,{withFileTypes:true})).filter(x=>x.isFile()).map(x=>x.name).sort().reverse();for(const f of files.slice(limit))await fsp.unlink(path.join(dir,f));}catch(e){log(`Retention cleanup failed: ${e.message}`);}}
 function acceptedStateKey(c,rel){return `${c.name}::${rel}`;}
@@ -615,6 +676,7 @@ async function buildRemoteStatusProtected(c, options={}){
 }
 
 async function remoteSync(c, actions, confirm){
+  return withOperationLock(c,'remote-sync',async()=>{
   // Refresh the remote observation immediately before a sync decision, but
   // NEVER advance the comparison baseline during this refresh. The baseline
   // must remain the state against which the user was shown the change.
@@ -675,6 +737,7 @@ async function remoteSync(c, actions, confirm){
   await saveRemoteMeta(nextBaseline);
   await clearRemotePending();
   return {requiresConfirmation:false,connection:c.name,synced,kept,failed,conflicts:pending.conflicts,summary:{remoteNew:pending.remoteNew.length,remoteUntracked:pending.remoteUntracked.length,remoteChanged:pending.remoteChanged.length,remoteDeleted:pending.remoteDeleted.length,conflicts:pending.conflicts.length},message:`Synced ${synced.length} remote change(s); kept ${kept.length}; failed ${failed.length}.`};
+  });
 }
 
 async function buildPlan(c){
@@ -825,6 +888,7 @@ async function workspaceState(c){
 }
 
 async function initializeWorkspaceFromHost(c, mappings, confirm){
+  return withOperationLock(c,'workspace-setup',async()=>{
   if(!confirm) return {
     requiresConfirmation:true,
     message:'No files were downloaded. Review the selected remote-to-local mappings, then call initialize again with confirm=true.'
@@ -901,9 +965,11 @@ async function initializeWorkspaceFromHost(c, mappings, confirm){
     count:downloaded.length,
     message:'Workspace initialized from hosting. The downloaded files are now the local working copy and their SHA-256 hashes were recorded.'
   };
+  });
 }
 
 async function deploy(c, confirm, deletionActions=[], confirmation='') {
+  return withOperationLock(c,'deploy',async()=>{
   const plan=await buildPlan(c);
   const uploadItems=plan.filter(x=>x.status==='NEW'||x.status==='CHANGED');
   const deletedItems=plan.filter(x=>x.status==='DELETED');
@@ -993,6 +1059,7 @@ async function deploy(c, confirm, deletionActions=[], confirmation='') {
     kept,
     message:`Uploaded ${uploaded.length}; restored ${restored.length}; remotely deleted ${deleted.length}; failed ${failed.length + restoreFailed.length + deleteFailed.length}.`
   };
+  });
 }
 
 async function bootstrapDefault(){
