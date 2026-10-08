@@ -1,3 +1,10 @@
+## [1.11.6] - 2026-10-08
+
+### Fixed
+- Reject actual NUL bytes in local folder mappings instead of checking for a literal backslash-zero sequence.
+- Fail closed when the deployment manifest exists but is malformed or unreadable.
+- Fail closed when the saved remote baseline exists but is malformed or unreadable.
+
 ## [1.11.5] - 2026-10-08
 
 ### Fixed
