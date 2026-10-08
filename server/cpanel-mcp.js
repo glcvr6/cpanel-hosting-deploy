@@ -8,7 +8,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
-const VERSION = '1.13.1';
+const VERSION = '1.13.2';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];
@@ -1395,7 +1395,7 @@ async function callTool(name,a){
         const manifest=await loadManifest();
         manifest[rel]=sha256(local);
         await saveManifest(manifest);
-      });downloaded.push(rel);}catch(e){errors.push({path:rel,error:String(e.message||e)});}}});await Promise.all(workers);await saveManifest(manifest);const result={downloaded,count:downloaded.length,failed:errors,message:errors.length?`Download completed with ${errors.length} failed file(s).`:'Download completed successfully.',warning:'Download was explicitly requested. Existing local files may be overwritten.'};return result;});}
+      });downloaded.push(rel);}catch(e){errors.push({path:rel,error:String(e.message||e)});}}});await Promise.all(workers);const result={downloaded,count:downloaded.length,failed:errors,message:errors.length?`Download completed with ${errors.length} failed file(s).`:'Download completed successfully.',warning:'Download was explicitly requested. Existing local files may be overwritten.'};return result;});}
   throw new Error(`Unknown tool: ${name}`);
 }
 

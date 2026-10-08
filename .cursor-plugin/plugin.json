@@ -1,6 +1,6 @@
 {
   "name": "cpanel-hosting-deploy",
-  "version": "1.13.1",
+  "version": "1.13.2",
   "description": "Safe cPanel deployment and remote synchronization for Cursor with configurable SECURED, CUSTOM, and OFF protection modes.",
   "author": {
     "name": "Gabrijel Baban"
