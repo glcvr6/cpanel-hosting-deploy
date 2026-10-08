@@ -37,7 +37,9 @@ assert(s.includes("async function updateManifestEntry(rel,value)"),'manifest ent
 assert(s.includes("async function buildPlan(c)"),'build plan wrapper missing');
 assert(s.includes("return await withManifestLock(()=>buildPlanUnlocked(c));"),'build plan must serialize manifest read-modify-write state');
 const downloadStart=s.indexOf("if(name==='cpanel_download')");
-const downloadBlock=s.slice(downloadStart);
+const downloadEnd=s.indexOf("\\n  throw new Error(\`Unknown tool:",downloadStart);
+const downloadBlock=s.slice(downloadStart,downloadEnd);
+assert(downloadStart>=0&&downloadEnd>downloadStart,'download handler boundaries missing');
 assert(!downloadBlock.includes("await saveManifest(manifest)"),'download handler must not save a removed stale manifest object');
 assert(s.includes("st.isSymbolicLink()"),'symbolic links must be rejected in deployment paths');
 assert(s.includes("AbortSignal.timeout(120000)"),'cPanel API calls must have bounded timeouts');
