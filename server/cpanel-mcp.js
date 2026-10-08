@@ -8,7 +8,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
-const VERSION = '1.13.0';
+const VERSION = '1.13.1';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];
@@ -135,13 +135,13 @@ function readJsonLine(line) {
 
 async function ensureStore() {
   await fsp.mkdir(APP_DIR, {recursive:true});
-  try {
-    const handle=await fsp.open(CONNECTIONS_FILE,'wx');
-    try { await handle.writeFile(JSON.stringify({version:1, connections:[]}, null, 2),'utf8'); }
-    finally { await handle.close(); }
-  } catch(e) {
-    if(e.code!=='EEXIST') throw e;
-  }
+  await withFileLock(path.join(APP_DIR,'connections-store.lock'),'connections-store-init',async()=>{
+    try { await fsp.access(CONNECTIONS_FILE); }
+    catch(e) {
+      if(e.code!=='ENOENT') throw e;
+      await atomicJsonWrite(CONNECTIONS_FILE,{version:1,connections:[]});
+    }
+  });
 }
 function validateStore(store){
   if(!store || typeof store!=='object' || Array.isArray(store) || !Array.isArray(store.connections)){
