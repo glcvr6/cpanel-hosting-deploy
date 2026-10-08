@@ -273,7 +273,7 @@ async function api2FileOp(c,op,sourcefiles){
   u.searchParams.set('op',op);
   u.searchParams.set('sourcefiles',String(sourcefiles));
   u.searchParams.set('doubledecode','1');
-  const r=await fetch(u,{headers:authHeaders(c)});
+  const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});
   const text=await r.text();
   let j; try{j=JSON.parse(text);}catch(_){throw new Error('cPanel API 2 returned non-JSON response ('+r.status+').');}
   const cr=j && j.cpanelresult;
@@ -1063,10 +1063,11 @@ async function initializeWorkspaceFromHost(c, mappings, confirm){
       }
       if(!allowedRemote(c,rp)) continue;
       const local=path.join(WORKSPACE,...rel.split('/'));
+      await assertSafeLocalPath(local);
       try { await fsp.access(local); throw new Error(`Local target became non-empty during initialization: ${rel}`); }
       catch(e) { if(e.code!=='ENOENT') throw e; }
       const u=new URL(`${c.host}/download`); u.searchParams.set('file',rp);
-      const r=await fetch(u,{headers:authHeaders(c)});
+      const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});
       if(!r.ok) throw new Error(`Download failed HTTP ${r.status} for ${rp}`);
       const b=Buffer.from(await r.arrayBuffer());
       await fsp.mkdir(path.dirname(local),{recursive:true});
