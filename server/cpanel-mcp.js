@@ -180,7 +180,11 @@ function normalizeRemote(p) {
 }
 function safeName(s) { return String(s || '').trim(); }
 function normalizeLocalPath(p){
-  let x=String(p||'').replaceAll('\\','/').replace(/^\.\//,'').replace(/^\/+|\/+$/g,'');
+  const raw=String(p||'').trim().replaceAll('\\','/');
+  if(!raw || raw==='.') throw new Error('Local folder mapping cannot be empty.');
+  if(raw.includes('\\0')) throw new Error('Local folder mapping cannot contain NUL bytes.');
+  if(/^[A-Za-z]:($|\/)/.test(raw) || raw.startsWith('//')) throw new Error('Local folder mapping must be relative to the workspace.');
+  let x=raw.replace(/^\.\//,'').replace(/^\/+|\/+$/g,'');
   if(!x || x==='.') throw new Error('Local folder mapping cannot be empty.');
   if(x==='..' || x.startsWith('../') || x.includes('/../')) throw new Error('Local folder mapping cannot escape the workspace.');
   return x;
@@ -188,7 +192,10 @@ function normalizeLocalPath(p){
 function normalizeRemoteMapping(remoteRoot,p){
   const raw=String(p||'').trim();
   if(!raw) throw new Error('Remote folder mapping cannot be empty.');
-  return normalizeRemote(raw.startsWith('/') ? raw : `${remoteRoot}/${raw}`);
+  const root=normalizeRemote(remoteRoot);
+  const resolved=normalizeRemote(raw.startsWith('/') ? raw : root+'/'+raw);
+  if(resolved===root || !resolved.startsWith(root+'/')) throw new Error('Remote folder mapping must stay inside the connection remote root: '+resolved);
+  return resolved;
 }
 function normalizeMappings(remoteRoot, mappings){
   if(!Array.isArray(mappings)) return [];
@@ -225,6 +232,8 @@ async function getConnection(name) {
 }
 
 function authHeaders(c) {
+  const u=new URL(c.host);
+  if(u.protocol!=='https:') throw new Error('cPanel host must use HTTPS so the API token is not sent over cleartext HTTP.');
   const token=revealToken(c.tokenEncrypted);
   return {'Authorization':`cpanel ${c.username}:${token}`};
 }
@@ -243,15 +252,14 @@ async function apiUpload(c,remoteDir,localFile) {
   form.append('dir',remoteDir);
   form.append('overwrite','1');
   form.append('file-1',new Blob([data]),path.basename(localFile));
-  const token=revealToken(c.tokenEncrypted);
-  const r=await fetch(`${c.host}/execute/Fileman/upload_files`,{method:'POST',headers:{'Authorization':`cpanel ${c.username}:${token}`},body:form});
+  const headers=authHeaders(c);
+  const r=await fetch(`${c.host}/execute/Fileman/upload_files`,{method:'POST',headers,body:form});
   const text=await r.text();
   let j; try{j=JSON.parse(text);}catch(_){throw new Error(`Upload returned non-JSON response (${r.status}).`);}
   if (!r.ok || j.status !== 1) throw new Error((j.errors||[]).join('; ') || `Upload failed with HTTP ${r.status}`);
   if (j.data && Number(j.data.failed||0)>0) throw new Error(`cPanel reported ${j.data.failed} failed upload(s).`);
   return j;
 }
-
 function sha256(file){
   const h=crypto.createHash('sha256'); h.update(fs.readFileSync(file)); return h.digest('hex');
 }
@@ -527,7 +535,8 @@ async function buildRemoteStatus(c, options={}){
     if(!remoteFiles.has(rp)) remoteDeleted.push({path:rel,remote:rp});
   }
 
-  if(advanceBaseline) await saveRemoteMeta(current);
+  const hasDifferences = remoteNew.length||remoteUntracked.length||remoteChanged.length||remoteDeleted.length||conflicts.length;
+  if(advanceBaseline && !hasDifferences) await saveRemoteMeta(current);
   const pending={createdAt:new Date().toISOString(),connection:c.name,remoteNew,remoteUntracked,remoteChanged,remoteDeleted,conflicts};
   await saveRemotePending(pending);
   return {
@@ -1059,9 +1068,9 @@ async function callTool(name,a){
   if(name==='cpanel_set_settings'){const c=await getConnection(a.name);const p={};if(a.protectionMode!==undefined)p.protectionMode=a.protectionMode;if(a.protection!==undefined)p.protection=a.protection;if(a.largeFileThresholdMB!==undefined)p.largeFileThresholdBytes=Math.max(1,Number(a.largeFileThresholdMB)*1024*1024);for(const k of ['retryAttempts','reportRetention','backupRetention','autoDeploy','verifyAfterSync','verifyMethod'])if(a[k]!==undefined)p[k]=a[k];const settings=await updateSettings(c,p);return {connection:c.name,settings,warning:protectionWarning(c)};}
   if(name==='cpanel_list_connections'){const s=await loadStore();return {connections:s.connections.map(sanitizeConnection)};}
   if(name==='cpanel_add_connection'){const s=await loadStore();if(s.connections.some(x=>x.name.toLowerCase()===String(a.name).toLowerCase()))throw new Error('A connection with that name already exists.');const c=validateConnectionInput(a);s.connections.push(c);await saveStore(s);return {connection:sanitizeConnection(c),message:'Connection added. Secret token is encrypted locally and was not returned.'};}
-  if(name==='cpanel_edit_connection'){const s=await loadStore();const c=s.connections.find(x=>x.name.toLowerCase()===String(a.name).toLowerCase());if(!c)throw new Error(`Connection not found: ${a.name}`);if(a.newName)c.name=safeName(a.newName);if(a.host)c.host=safeName(a.host).replace(/\/+$/,'');if(a.username)c.username=safeName(a.username);if(a.remoteRoot)c.remoteRoot=normalizeRemote(a.remoteRoot);if(a.mappings)c.mappings=normalizeMappings(c.remoteRoot,a.mappings);if(a.exclude)c.exclude=a.exclude.map(String).filter(Boolean);if(a.settings)c.settings=normalizeSettings(a.settings);if(a.apiToken)c.tokenEncrypted=protectToken(a.apiToken);await saveStore(s);return {connection:sanitizeConnection(c),message:'Connection updated. Secret token was not returned.'};}
+  if(name==='cpanel_edit_connection'){const s=await loadStore();const c=s.connections.find(x=>x.name.toLowerCase()===String(a.name).toLowerCase());if(!c)throw new Error(`Connection not found: ${a.name}`);if(a.newName)c.name=safeName(a.newName);if(a.host){const h=safeName(a.host);if(!/^https:\/\//i.test(h))throw new Error('Host must use https://.');c.host=h.replace(/\/+$/,'');}if(a.username)c.username=safeName(a.username);if(a.remoteRoot)c.remoteRoot=normalizeRemote(a.remoteRoot);if(a.mappings)c.mappings=normalizeMappings(c.remoteRoot,a.mappings);else if(a.remoteRoot)c.mappings=normalizeMappings(c.remoteRoot,c.mappings);if(a.exclude)c.exclude=a.exclude.map(String).filter(Boolean);if(a.settings)c.settings=normalizeSettings(a.settings);if(a.apiToken)c.tokenEncrypted=protectToken(a.apiToken);await saveStore(s);return {connection:sanitizeConnection(c),message:'Connection updated. Secret token was not returned.'};}
   if(name==='cpanel_remove_connection'){const s=await loadStore();const before=s.connections.length;s.connections=s.connections.filter(x=>x.name.toLowerCase()!==String(a.name).toLowerCase());if(s.connections.length===before)throw new Error(`Connection not found: ${a.name}`);await saveStore(s);return {removed:a.name};}
-  if(name==='cpanel_list_remote_folders'){const c=await getConnection(a.name);const dir=normalizeRemote(a.path||c.remoteRoot);const j=await apiGet(c,'Fileman','list_files',{dir});return {connection:c.name,path:dir,folders:(j.data||[]).filter(x=>String(x.type)==='dir'||String(x.type)==='directory').map(x=>String(x.file||x.name||'')).filter(Boolean)};}
+  if(name==='cpanel_list_remote_folders'){const c=await getConnection(a.name);const dir=normalizeRemote(a.path||c.remoteRoot);const root=normalizeRemote(c.remoteRoot);if(dir!==root&&!dir.startsWith(root+'/'))throw new Error('Remote folder path must stay inside the connection remote root: '+dir);const j=await apiGet(c,'Fileman','list_files',{dir});return {connection:c.name,path:dir,folders:(j.data||[]).filter(x=>String(x.type)==='dir'||String(x.type)==='directory').map(x=>String(x.file||x.name||'')).filter(Boolean)};}
   if(name==='cpanel_test_connection'){const c=await getConnection(a.name);const j=await apiGet(c,'Fileman','list_files',{dir:c.remoteRoot});return {ok:true,connection:sanitizeConnection(c),remoteRootItems:Array.isArray(j.data)?j.data.length:0,message:'cPanel connection is working.'};}
   if(name==='cpanel_workspace_state'){const c=await getConnection(a.name);return await workspaceState(c);}
   if(name==='cpanel_workspace_setup'){const c=await getConnection(a.name);return await initializeWorkspaceFromHost(c,a.mappings,Boolean(a.confirm));}

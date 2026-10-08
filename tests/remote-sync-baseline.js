@@ -3,7 +3,7 @@ const source=fs.readFileSync(path.join(__dirname,'..','server','cpanel-mcp.js'),
 
 if(!source.includes("async function buildRemoteStatus(c, options={})")) throw Error('buildRemoteStatus options missing');
 if(!source.includes("async function buildRemoteStatusProtected(c, options={})")) throw Error('protected status options missing');
-if(!source.includes("if(advanceBaseline) await saveRemoteMeta(current);")) throw Error('unprotected baseline guard missing');
+if(!source.includes("if(advanceBaseline && !hasDifferences) await saveRemoteMeta(current);")) throw Error('unprotected baseline guard missing');
 if(!source.includes("if(advanceBaseline && (!hasDifferences || (!remoteChanged.length && !remoteDeleted.length && !conflicts.length))) await saveRemoteMeta(current);")) throw Error('protected baseline guard missing');
 
 const start=source.indexOf("async function remoteSync(c, actions, confirm){");
