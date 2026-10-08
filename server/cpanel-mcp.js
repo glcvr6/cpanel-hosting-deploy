@@ -699,14 +699,14 @@ async function remoteSync(c, actions, confirm){
       if(item.status==='REMOTE DELETED'){
         if(action.confirmation!=='DELETE_LOCAL') throw new Error('Syncing REMOTE DELETED requires confirmation value DELETE_LOCAL.');
         if(protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'localBackups')){
-          await copyLocalBackup(item.path,'remote-deleted');
+          await copyLocalBackup(c,item.path,'remote-deleted');
         }
         await fsp.rm(local,{force:true});
         const manifest=await loadManifest(); delete manifest[item.path]; await saveManifest(manifest);
       } else {
         if(item.status==='REMOTE CHANGED' && action.confirmation!=='OVERWRITE_LOCAL') throw new Error('Syncing REMOTE CHANGED requires confirmation value OVERWRITE_LOCAL.');
         if(item.status==='REMOTE CHANGED' && protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'localBackups')){
-          await copyLocalBackup(item.path,'remote-overwritten');
+          await copyLocalBackup(c,item.path,'remote-overwritten');
         }
         const hash=await retryOperation(()=>downloadOne(c,item.remote,item.path,true),transferAttempts(c));
         const manifest=await loadManifest(); manifest[item.path]=hash; await saveManifest(manifest);
