@@ -1,3 +1,11 @@
+## [1.12.0] - 2026-10-08
+
+### Fixed
+- Reject symbolic links in local deployment/download paths so filesystem operations cannot escape the workspace through symlinks.
+- Serialize explicit full local uploads and downloads with the operation lock.
+- Revalidate full-upload overwrite targets immediately before each upload.
+- Bound cPanel API requests with a 120-second timeout.
+
 ## [1.11.9] - 2026-10-08
 
 ### Fixed

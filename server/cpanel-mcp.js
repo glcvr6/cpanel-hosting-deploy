@@ -8,7 +8,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
-const VERSION = '1.11.9';
+const VERSION = '1.12.0';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];
@@ -258,7 +258,7 @@ function authHeaders(c) {
 async function apiGet(c,module,fn,params={}) {
   const u=new URL(`${c.host}/execute/${module}/${fn}`);
   for (const [k,v] of Object.entries(params)) u.searchParams.set(k,String(v));
-  const r=await fetch(u,{headers:authHeaders(c)});
+  const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});
   const text=await r.text();
   let j; try{j=JSON.parse(text);}catch(_){throw new Error(`cPanel returned non-JSON response (${r.status}).`);}
   if (!r.ok || j.status !== 1) throw new Error((j.errors||[]).join('; ') || `cPanel API HTTP ${r.status}`);
@@ -273,7 +273,7 @@ async function api2FileOp(c,op,sourcefiles){
   u.searchParams.set('op',op);
   u.searchParams.set('sourcefiles',String(sourcefiles));
   u.searchParams.set('doubledecode','1');
-  const r=await fetch(u,{headers:authHeaders(c)});
+  const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});
   const text=await r.text();
   let j; try{j=JSON.parse(text);}catch(_){throw new Error('cPanel API 2 returned non-JSON response ('+r.status+').');}
   const cr=j && j.cpanelresult;
@@ -289,7 +289,7 @@ async function apiUpload(c,remoteDir,localFile) {
   form.append('overwrite','1');
   form.append('file-1',new Blob([data]),path.basename(localFile));
   const headers=authHeaders(c);
-  const r=await fetch(`${c.host}/execute/Fileman/upload_files`,{method:'POST',headers,body:form});
+  const r=await fetch(`${c.host}/execute/Fileman/upload_files`,{method:'POST',headers,body:form,signal:AbortSignal.timeout(120000)});
   const text=await r.text();
   let j; try{j=JSON.parse(text);}catch(_){throw new Error(`Upload returned non-JSON response (${r.status}).`);}
   if (!r.ok || j.status !== 1) throw new Error((j.errors||[]).join('; ') || `Upload failed with HTTP ${r.status}`);
@@ -303,6 +303,23 @@ function relativePosix(full){
   const rel=path.relative(WORKSPACE,full).replaceAll('\\','/');
   if (rel.startsWith('../') || rel==='..' || path.isAbsolute(rel)) throw new Error(`Path outside workspace: ${full}`);
   return rel;
+}
+async function assertSafeLocalPath(target){
+  const absolute=path.resolve(target);
+  const workspace=path.resolve(WORKSPACE);
+  const rel=path.relative(workspace,absolute);
+  if(rel==='..' || rel.startsWith('..'+path.sep) || path.isAbsolute(rel)) throw new Error(`Local path is outside the workspace: ${target}`);
+  let current=workspace;
+  for(const part of rel.split(path.sep).filter(Boolean)){
+    current=path.join(current,part);
+    try{
+      const st=await fsp.lstat(current);
+      if(st.isSymbolicLink()) throw new Error(`Symbolic links are not allowed in deployment paths: ${target}`);
+    }catch(e){
+      if(e.code==='ENOENT') break;
+      throw e;
+    }
+  }
 }
 function normalizeExcludePath(value){
   let x=String(value||'').trim().replaceAll('\\','/');
@@ -442,13 +459,14 @@ async function remoteHashes(c, remotePaths, concurrency = 6) {
 }
 
 async function downloadOne(c, remotePath, rel, overwrite = true) {
+  const local=localPathForRel(rel);
+  await assertSafeLocalPath(local);
   const u = new URL(`${c.host}/download`);
   u.searchParams.set('file', remotePath);
   const r = await fetch(u, {headers: authHeaders(c), signal: AbortSignal.timeout(120000)});
   if (!r.ok) throw new Error(`Download failed HTTP ${r.status} for ${remotePath}`);
 
   const b = Buffer.from(await r.arrayBuffer());
-  const local = path.join(WORKSPACE, ...rel.split('/'));
   await fsp.mkdir(path.dirname(local), {recursive: true});
 
   if (!overwrite) {
@@ -530,7 +548,7 @@ function isIgnoredProtectionPath(rel){
     p.startsWith('.cpanel-sync-backup/') || p.includes('/.cpanel-sync-backup/');
 }
 async function copyLocalBackup(c,rel,suffix){
-  const src=localPathForRel(rel); if(!fs.existsSync(src)) return null;
+  const src=localPathForRel(rel); await assertSafeLocalPath(src); if(!fs.existsSync(src)) return null;
   const dst=path.join(backupRoot(),...String(rel).split('/'))+'.'+suffix+'.backup';
   await fsp.mkdir(path.dirname(dst),{recursive:true});
   let target=dst, n=1; while(fs.existsSync(target)){target=dst.replace(/\.backup$/,'.'+(n++)+'.backup');}
@@ -558,8 +576,20 @@ async function cleanupRemoteBackups(c){
 }
 async function remoteBackup(c,remotePath,rel,suffix){
   const tmp=path.join(os.tmpdir(),`cpanel-backup-${crypto.randomUUID()}`); await fsp.mkdir(tmp,{recursive:true});
-  const localTmp=path.join(tmp,path.basename(remotePath));
-  try{ const u=new URL(`${c.host}/download`);u.searchParams.set('file',remotePath);const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});if(!r.ok)throw new Error(`Remote backup download failed HTTP ${r.status}`);await fsp.writeFile(localTmp,Buffer.from(await r.arrayBuffer()));await ensureRemoteDir(c,`${remoteBackupRoot()}/${path.posix.dirname(rel)}`);await apiUpload(c,`${remoteBackupRoot()}/${path.posix.dirname(rel)}`,localTmp);await cleanupRemoteBackups(c);return normalizeRemote(`${remoteBackupRoot()}/${rel}.${suffix}.backup`);}finally{await fsp.rm(tmp,{recursive:true,force:true}).catch(()=>{});}}
+  const backupName=`${path.basename(rel)}.${suffix}.${Date.now()}.${crypto.randomUUID()}.backup`;
+  const localTmp=path.join(tmp,backupName);
+  const remoteDir=normalizeRemote(`${remoteBackupRoot()}/${path.posix.dirname(rel)}`);
+  try{
+    const u=new URL(`${c.host}/download`);u.searchParams.set('file',remotePath);
+    const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});
+    if(!r.ok)throw new Error(`Remote backup download failed HTTP ${r.status}`);
+    await fsp.writeFile(localTmp,Buffer.from(await r.arrayBuffer()));
+    await ensureRemoteDir(c,remoteDir);
+    await apiUpload(c,remoteDir,localTmp);
+    await cleanupRemoteBackups(c);
+    return normalizeRemote(`${remoteDir}/${backupName}`);
+  }finally{await fsp.rm(tmp,{recursive:true,force:true}).catch(()=>{});}
+}
 async function requireKeyword(action,provided,enabled=true){if(!enabled)return; if(String(provided||'').toUpperCase()!==action)throw new Error(`This operation requires confirmation keyword ${action}.`);}
 async function verifyRemoteContent(c,rp,localFile){const rh=await remoteSha256(c,rp);if(rh===null)return {ok:false,missing:true};const lh=sha256(localFile);return {ok:rh===lh,localHash:lh,remoteHash:rh};}
 async function retryOperation(fn,attempts){let last;for(let i=0;i<attempts;i++){try{return await fn(i+1);}catch(e){last=e;if(i===attempts-1)throw e;}}throw last;}
@@ -901,10 +931,11 @@ async function buildPlan(c){
   for(const m of (c.mappings||[])){
     if(m.enabled===false) continue;
     const root=path.join(WORKSPACE,...m.local.split('/'));
-    try{await fsp.access(root);}catch(_){continue;}
+    try{await assertSafeLocalPath(root);await fsp.access(root);}catch(_){continue;}
     async function walk(dir){
       for(const ent of await fsp.readdir(dir,{withFileTypes:true})){
         const full=path.join(dir,ent.name); const rel=relativePosix(full);
+        if(ent.isSymbolicLink()) throw new Error(`Symbolic links are not allowed in deployment paths: ${rel}`);
         if(excluded(rel,c.exclude)) continue;
         if(ent.isDirectory()){await walk(full);continue;}
         const hash=sha256(full);
@@ -1043,10 +1074,11 @@ async function initializeWorkspaceFromHost(c, mappings, confirm){
       }
       if(!allowedRemote(c,rp)) continue;
       const local=path.join(WORKSPACE,...rel.split('/'));
+      await assertSafeLocalPath(local);
       try { await fsp.access(local); throw new Error(`Local target became non-empty during initialization: ${rel}`); }
       catch(e) { if(e.code!=='ENOENT') throw e; }
       const u=new URL(`${c.host}/download`); u.searchParams.set('file',rp);
-      const r=await fetch(u,{headers:authHeaders(c)});
+      const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});
       if(!r.ok) throw new Error(`Download failed HTTP ${r.status} for ${rp}`);
       const b=Buffer.from(await r.arrayBuffer());
       await fsp.mkdir(path.dirname(local),{recursive:true});
@@ -1300,13 +1332,16 @@ async function callTool(name,a){
     const r=await deploy(c,Boolean(a.confirm)||Boolean(st.autoDeploy&&accepted.length),a.deletionActions||[],a.confirmation||'');if(st.protectionMode==='OFF') return r;if(r && accepted.length)r.acceptedLocal=accepted.map(x=>x.relativePath);r.protection=protectionWarning(c);return r;}
   if(name==='cpanel_local_upload'){
     const c=await getConnection(a.name);
+    return await withOperationLock(c,'local-upload',async()=>{
     const files=[];
-    for(const m of (c.mappings||[])){ if(m.enabled===false) continue; const root=path.join(WORKSPACE,...m.local.split('/')); try{await fsp.access(root);}catch(_){continue;}
-      async function walk(dir){ for(const ent of await fsp.readdir(dir,{withFileTypes:true})){ const full=path.join(dir,ent.name); const rel=relativePosix(full); if(excluded(rel,c.exclude)) continue; if(ent.isDirectory()){await walk(full);continue;} const remote=remoteFromRel(c,rel); files.push({path:rel,remote,size:ent.size}); }}
+    for(const m of (c.mappings||[])){ if(m.enabled===false) continue; const root=path.join(WORKSPACE,...m.local.split('/')); try{await assertSafeLocalPath(root);await fsp.access(root);}catch(_){continue;}
+      async function walk(dir){ for(const ent of await fsp.readdir(dir,{withFileTypes:true})){ const full=path.join(dir,ent.name); const rel=relativePosix(full); if(ent.isSymbolicLink()) throw new Error(`Symbolic links are not allowed in deployment paths: ${rel}`); if(excluded(rel,c.exclude)) continue; if(ent.isDirectory()){await walk(full);continue;} const remote=remoteFromRel(c,rel); files.push({path:rel,remote,size:ent.size}); }}
       await walk(root); }
     if(!a.confirm) return {requiresConfirmation:true,connection:c.name,count:files.length,files,message:'FULL LOCAL → HOSTING upload. Existing remote files with the same paths will be overwritten; new local files will be added; remote-only files will not be deleted. No changes were made.'};
+    let overwriteSnapshot=null;
     if(protectionEnabled(c,'overwriteConfirmation')){
       const remoteFiles=await listRemoteFiles(c);
+      overwriteSnapshot=remoteFiles;
       const overwriteTargets=files.filter(f=>remoteFiles.has(f.remote));
       if(overwriteTargets.length && String(a.confirmation||'').toUpperCase()!=='OVERWRITE'){
         return {requiresConfirmation:true,protectionConfirmation:'OVERWRITE',connection:c.name,count:files.length,overwriteCount:overwriteTargets.length,overwriteFiles:overwriteTargets.map(x=>x.path),message:'Protection requires the confirmation keyword OVERWRITE because this full upload will overwrite existing hosting files. No hosting changes were made.'};
@@ -1314,18 +1349,21 @@ async function callTool(name,a){
     }
     const manifest=await loadManifest(),uploaded=[],failed=[];
     for(const f of files){try{
+      if(overwriteSnapshot) await verifyRemoteSnapshot(c,f.remote,overwriteSnapshot.get(f.remote)||null,overwriteSnapshot.has(f.remote));
       if(protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'remoteBackups')){
         const remoteFiles=await listRemoteFiles(c);
         if(remoteFiles.has(f.remote)) await retryOperation(()=>remoteBackup(c,f.remote,f.path,'remote-overwritten'),transferAttempts(c));
       }
       await ensureRemoteDir(c,path.posix.dirname(f.remote));await retryOperation(()=>apiUpload(c,path.posix.dirname(f.remote),path.join(WORKSPACE,...f.path.split('/'))),transferAttempts(c));manifest[f.path]=sha256(path.join(WORKSPACE,...f.path.split('/')));await saveManifest(manifest);uploaded.push(f.path);}catch(e){failed.push({path:f.path,error:e.message});}}
-    return {requiresConfirmation:false,connection:c.name,uploaded,failed,message:`Full upload completed: ${uploaded.length} uploaded, ${failed.length} failed.`};
+    const result={requiresConfirmation:false,connection:c.name,uploaded,failed,message:`Full upload completed: ${uploaded.length} uploaded, ${failed.length} failed.`};
+    return result;
+    });
   }
   if(name==='cpanel_remote_status'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);if(st.protectionMode==='OFF') return await buildRemoteStatus(c);const r=await buildRemoteStatusProtected(c);r.protection=protectionWarning(c);return r;}
   if(name==='cpanel_remote_sync'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);const r=await remoteSync(c,a.actions||[],Boolean(a.confirm));if(st.protectionMode==='OFF') return r;r.protection=protectionWarning(c);if(r.requiresConfirmation)return r;if(st.verifyAfterSync&&protectionEnabled(c,'contentVerification')){r.verification='requested';}return r;}
-  if(name==='cpanel_download'){const c=await getConnection(a.name);const manifest=await loadManifest();const files=[];const errors=[];async function walk(remoteDir,localRoot,remoteRoot){const j=await apiGet(c,'Fileman','list_files',{dir:remoteDir});for(const item of (j.data||[])){const nm=String(item.file||item.name||'');if(!nm)continue;const rp=normalizeRemote(`${remoteDir}/${nm}`);const tail=rp.slice(remoteRoot.length).replace(/^\/+/, '');const rel=path.posix.join(localRoot,tail);if(excluded(rel,c.exclude))continue;if(String(item.type)==='dir'||String(item.type)==='directory'){await walk(rp,localRoot,remoteRoot);continue;}if(!allowedRemote(c,rp))continue;files.push({rp,rel});}}
-    for(const m of (c.mappings||[])){if(m.enabled===false)continue;await walk(normalizeRemote(m.remote),m.local,normalizeRemote(m.remote));}
-    let next=0;const workers=Array.from({length:6},async()=>{while(true){const i=next++;if(i>=files.length)return;const {rp,rel}=files[i];try{const u=new URL(`${c.host}/download`);u.searchParams.set('file',rp);const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});if(!r.ok)throw new Error(`HTTP ${r.status}`);const b=Buffer.from(await r.arrayBuffer());const local=path.join(WORKSPACE,...rel.split('/'));await fsp.mkdir(path.dirname(local),{recursive:true});await fsp.writeFile(local,b);manifest[rel]=sha256(local);}catch(e){errors.push({path:rel,error:String(e.message||e)});}}});await Promise.all(workers);await saveManifest(manifest);return {downloaded:files.filter(x=>Object.prototype.hasOwnProperty.call(manifest,x.rel)).map(x=>x.rel),count:files.filter(x=>Object.prototype.hasOwnProperty.call(manifest,x.rel)).length,failed:errors,message:errors.length?`Download completed with ${errors.length} failed file(s).`:'Download completed successfully.',warning:'Download was explicitly requested. Existing local files may be overwritten.'};}
+  if(name==='cpanel_download'){const c=await getConnection(a.name);return await withOperationLock(c,'download',async()=>{const manifest=await loadManifest();const files=[];const errors=[];async function walk(remoteDir,localRoot,remoteRoot){const j=await apiGet(c,'Fileman','list_files',{dir:remoteDir});for(const item of (j.data||[])){const nm=String(item.file||item.name||'');if(!nm)continue;const rp=normalizeRemote(`${remoteDir}/${nm}`);const tail=rp.slice(remoteRoot.length).replace(/^\/+/, '');const rel=path.posix.join(localRoot,tail);if(excluded(rel,c.exclude))continue;if(String(item.type)==='dir'||String(item.type)==='directory'){await walk(rp,localRoot,remoteRoot);continue;}if(!allowedRemote(c,rp))continue;files.push({rp,rel});}}
+    for(const m of (c.mappings||[])){if(m.enabled===false)continue;await assertSafeLocalPath(path.join(WORKSPACE,...m.local.split('/')));await walk(normalizeRemote(m.remote),m.local,normalizeRemote(m.remote));}
+    let next=0;const workers=Array.from({length:6},async()=>{while(true){const i=next++;if(i>=files.length)return;const {rp,rel}=files[i];try{const u=new URL(`${c.host}/download`);u.searchParams.set('file',rp);const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});if(!r.ok)throw new Error(`HTTP ${r.status}`);const b=Buffer.from(await r.arrayBuffer());const local=path.join(WORKSPACE,...rel.split('/'));await assertSafeLocalPath(local);await fsp.mkdir(path.dirname(local),{recursive:true});await fsp.writeFile(local,b);manifest[rel]=sha256(local);}catch(e){errors.push({path:rel,error:String(e.message||e)});}}});await Promise.all(workers);await saveManifest(manifest);const result={downloaded:files.filter(x=>Object.prototype.hasOwnProperty.call(manifest,x.rel)).map(x=>x.rel),count:files.filter(x=>Object.prototype.hasOwnProperty.call(manifest,x.rel)).length,failed:errors,message:errors.length?`Download completed with ${errors.length} failed file(s).`:'Download completed successfully.',warning:'Download was explicitly requested. Existing local files may be overwritten.'};return result;});}
   throw new Error(`Unknown tool: ${name}`);
 }
 
