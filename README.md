@@ -10,6 +10,22 @@ cPanel Hosting Deploy connects a Cursor workspace to one or more cPanel accounts
 
 > **v1.11.0:** Protection is implemented with `SECURED`, `CUSTOM`, and `OFF` modes. The next development phase is systematic real-world testing of the Protection policies. Community testing on non-production cPanel accounts is welcome.
 
+---
+
+## ❤️ Support the project
+
+If **cPanel Hosting Deploy** is useful to you, you can support its continued development.
+
+### 💙 Donate via PayPal
+
+**[👉 Support the project with PayPal](https://paypal.me/gabrijelbaban)**
+
+Other donation options are available in [`SUPPORT.md`](SUPPORT.md), including:
+
+**Revolut · Genome · Binance Pay · BTC · USDT · ETH · BNB · USDC**
+
+---
+
 ## Why this project?
 
 Typical FTP-style deployment workflows make it easy to overwrite or delete the wrong thing. This project is designed around a different principle:
