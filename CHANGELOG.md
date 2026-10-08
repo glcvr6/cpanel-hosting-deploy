@@ -1,3 +1,10 @@
+## [1.11.3] - 2026-10-08
+
+### Fixed
+- Recover stale operation locks left by a crashed process without deleting active locks.
+- Make local backup retention recurse through nested backup paths and retain the newest backups by modification time.
+- Keep distributed version metadata aligned with the server release.
+
 ## [1.11.1] - 2026-10-08
 
 ### Fixed
