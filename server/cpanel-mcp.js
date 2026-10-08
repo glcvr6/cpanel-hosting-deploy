@@ -475,6 +475,7 @@ async function remoteBackup(c,remotePath,rel,suffix){
 async function requireKeyword(action,provided,enabled=true){if(!enabled)return; if(String(provided||'').toUpperCase()!==action)throw new Error(`This operation requires confirmation keyword ${action}.`);}
 async function verifyRemoteContent(c,rp,localFile){const rh=await remoteSha256(c,rp);if(rh===null)return {ok:false,missing:true};const lh=sha256(localFile);return {ok:rh===lh,localHash:lh,remoteHash:rh};}
 async function retryOperation(fn,attempts){let last;for(let i=0;i<attempts;i++){try{return await fn(i+1);}catch(e){last=e;if(i===attempts-1)throw e;}}throw last;}
+function transferAttempts(c){return protectionEnabled(c,'retry') ? normalizeSettings(c.settings).retryAttempts : 1;}
 async function writeReport(c,title,data){if(!protectionEnabled(c,'reports'))return null;const dir=reportRoot();await fsp.mkdir(dir,{recursive:true});const stamp=new Date().toISOString().replace(/[:.]/g,'-');let p=path.join(dir,`${stamp}-${title}.md`),n=1;while(fs.existsSync(p))p=path.join(dir,`${stamp}-${title}.${n++}.md`);await fsp.writeFile(p,`# ${title}\n\nConnection: ${c.name}\nTime: ${new Date().toISOString()}\n\n\`\`\`json\n${JSON.stringify(data,null,2)}\n\`\`\`\n`,'utf8');return p;}
 async function cleanupRetention(dir,limit){try{await fsp.mkdir(dir,{recursive:true});const files=(await fsp.readdir(dir,{withFileTypes:true})).filter(x=>x.isFile()).map(x=>x.name).sort().reverse();for(const f of files.slice(limit))await fsp.unlink(path.join(dir,f));}catch(e){log(`Retention cleanup failed: ${e.message}`);}}
 function acceptedStateKey(c,rel){return `${c.name}::${rel}`;}
@@ -636,7 +637,7 @@ async function remoteSync(c, actions, confirm){
         if(item.status==='REMOTE CHANGED' && protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'localBackups')){
           await copyLocalBackup(item.path,'remote-overwritten');
         }
-        const hash=await downloadOne(c,item.remote,item.path,true);
+        const hash=await retryOperation(()=>downloadOne(c,item.remote,item.path,true),transferAttempts(c));
         const manifest=await loadManifest(); manifest[item.path]=hash; await saveManifest(manifest);
       }
       synced.push(item.path);
@@ -915,10 +916,10 @@ async function deploy(c, confirm, deletionActions=[], confirmation='') {
       const remote=remoteFromRel(c,item.relativePath);
       if(!allowedRemote(c,remote)) throw new Error('Remote path is outside configured folders.');
       if(item.status==='CHANGED' && protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'remoteBackups')){
-        await remoteBackup(c,remote,item.relativePath,'remote-overwritten');
+        await retryOperation(()=>remoteBackup(c,remote,item.relativePath,'remote-overwritten'),transferAttempts(c));
       }
       await ensureRemoteDir(c,path.posix.dirname(remote));
-      await apiUpload(c,path.posix.dirname(remote),item.localPath);
+      await retryOperation(()=>apiUpload(c,path.posix.dirname(remote),item.localPath),transferAttempts(c));
       manifest[item.relativePath]=item.hash;
       await saveManifest(manifest);
       uploaded.push(item.relativePath);
@@ -939,7 +940,7 @@ async function deploy(c, confirm, deletionActions=[], confirmation='') {
       } else if(action.action==='delete') {
         if(String(action.confirmation||'')!=='DELETE') throw new Error('Remote deletion requires confirmation value DELETE.');
         if(protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'remoteBackups')){
-          await remoteBackup(c,remote,item.relativePath,'local-deleted');
+          await retryOperation(()=>remoteBackup(c,remote,item.relativePath,'local-deleted'),transferAttempts(c));
         }
         await api2FileOp(c,'trash',remote);
         delete manifest[item.relativePath];
@@ -1066,9 +1067,9 @@ async function callTool(name,a){
     for(const f of files){try{
       if(protectionEnabled(c,'backupBeforeDestructive') && protectionEnabled(c,'remoteBackups')){
         const remoteFiles=await listRemoteFiles(c);
-        if(remoteFiles.has(f.remote)) await remoteBackup(c,f.remote,f.path,'remote-overwritten');
+        if(remoteFiles.has(f.remote)) await retryOperation(()=>remoteBackup(c,f.remote,f.path,'remote-overwritten'),transferAttempts(c));
       }
-      await ensureRemoteDir(c,path.posix.dirname(f.remote));await apiUpload(c,path.posix.dirname(f.remote),path.join(WORKSPACE,...f.path.split('/')));manifest[f.path]=sha256(path.join(WORKSPACE,...f.path.split('/')));await saveManifest(manifest);uploaded.push(f.path);}catch(e){failed.push({path:f.path,error:e.message});}}
+      await ensureRemoteDir(c,path.posix.dirname(f.remote));await retryOperation(()=>apiUpload(c,path.posix.dirname(f.remote),path.join(WORKSPACE,...f.path.split('/'))),transferAttempts(c));manifest[f.path]=sha256(path.join(WORKSPACE,...f.path.split('/')));await saveManifest(manifest);uploaded.push(f.path);}catch(e){failed.push({path:f.path,error:e.message});}}
     return {requiresConfirmation:false,connection:c.name,uploaded,failed,message:`Full upload completed: ${uploaded.length} uploaded, ${failed.length} failed.`};
   }
   if(name==='cpanel_remote_status'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);if(st.protectionMode==='OFF') return await buildRemoteStatus(c);const r=await buildRemoteStatusProtected(c);r.protection=protectionWarning(c);return r;}
