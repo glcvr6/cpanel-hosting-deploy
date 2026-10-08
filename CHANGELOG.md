@@ -1,3 +1,10 @@
+## [1.11.5] - 2026-10-08
+
+### Fixed
+- Serialize accepted Protection-state read-modify-write updates with a dedicated stale-lock-safe file lock.
+- Harden lock cleanup with an ownership token so one process cannot remove another process's replacement lock.
+- Reuse the same lock implementation for destructive operation locks.
+
 ## [1.11.4] - 2026-10-08
 
 ### Fixed
