@@ -1,8 +1,29 @@
 ## [1.13.2] - 2026-10-08
 
 ### Fixed
-- Serialize deployment-manifest read-modify-write transactions with a dedicated lock.
-- Protect plan generation and local synchronization writes from concurrent manifest updates.
+- Removed a stale final `saveManifest()` call from the explicit download handler that referenced the pre-transaction manifest flow and could fail a completed download at runtime.
+- Added regression coverage scoped to the download handler so transactional manifest updates cannot regress into a stale final write.
+
+### Reliability and safety included in the 1.13.x line
+- Serialized deployment-manifest read-modify-write transactions with a dedicated manifest lock.
+- Protected plan generation and manifest updates from concurrent operations.
+- Made first-run `connections.json` creation atomic and exclusive.
+- Kept shared connection mutations transactional and atomic.
+- Added local symlink/path-boundary protection, remote-state TOCTOU revalidation, bounded cPanel API requests, unique remote backup names, and crash-safe persisted state.
+
+## [1.13.1] - 2026-10-08
+
+### Fixed
+- Made initial `connections.json` creation atomic under the connections-store initialization lock so readers cannot observe partially written JSON.
+
+## [1.13.0] - 2026-10-08
+
+### Fixed
+- Serialized deployment-manifest read-modify-write transactions with a dedicated lock.
+- Protected plan generation and synchronization manifest updates from concurrent writers.
+- Protected manifest-related onboarding, deploy, remote-sync, and download state updates.
+- Added regression coverage for manifest concurrency and local symlink protection in planning.
+- Fixed asynchronous manifest preflight handling during plan generation.
 
 ## [1.12.0] - 2026-10-08
 
