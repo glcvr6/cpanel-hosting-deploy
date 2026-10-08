@@ -594,7 +594,7 @@ async function setAccepted(c,rel,value){
     if(value)st.accepted[k]=value;else delete st.accepted[k];
     await saveProtectionState(st);
   });
-};const k=acceptedStateKey(c,rel);if(value)st.accepted[k]=value;else delete st.accepted[k];await saveProtectionState(st);}
+}
 async function getSettings(c){return normalizeSettings(c.settings);}
 async function updateSettings(c,patch){c.settings=normalizeSettings({...normalizeSettings(c.settings),...patch,protection:{...normalizeSettings(c.settings).protection,...(patch.protection||{})}});const store=await loadStore();const idx=store.connections.findIndex(x=>x.name.toLowerCase()===c.name.toLowerCase());if(idx<0)throw new Error(`Connection not found: ${c.name}`);store.connections[idx].settings=c.settings;await saveStore(store);return c.settings;}
 function protectionWarning(c){const st=normalizeSettings(c.settings);if(st.protectionMode==='OFF')return 'Protection is OFF: only the original v1.10.3 core workflow is active.';return st.protectionMode==='SECURED'?'Protection SECURED: all protection rules are active.':'Protection CUSTOM: only selected protection rules are active.';}
