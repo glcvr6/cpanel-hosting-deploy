@@ -6,14 +6,14 @@
 
 
 [![CI](https://github.com/glcvr6/cpanel-hosting-deploy/actions/workflows/ci.yml/badge.svg)](https://github.com/glcvr6/cpanel-hosting-deploy/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.11.8-blue.svg)](https://github.com/glcvr6/cpanel-hosting-deploy/releases)
+[![Version](https://img.shields.io/badge/version-1.11.9-blue.svg)](https://github.com/glcvr6/cpanel-hosting-deploy/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **A generic Cursor plugin for safe local-to-cPanel deployment and remote synchronization.**
 
 cPanel Hosting Deploy connects a Cursor workspace to one or more cPanel accounts, tracks file state with SHA-256 baselines, detects local and remote changes, identifies conflicts, and keeps destructive actions explicit.
 
-> **v1.11.8:** Revalidates the live remote state immediately before deploy and remote-sync actions, preventing stale observations from silently overwriting or deleting newer hosting changes.
+> **v1.11.9:** Hardens connection-store initialization and remote path normalization, and fixes protected remote-baseline advancement. the live remote state immediately before deploy and 
 
 ---
 
