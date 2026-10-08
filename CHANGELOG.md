@@ -1,3 +1,11 @@
+## [1.11.1] - 2026-10-08
+
+### Fixed
+- Fix Cursor plugin workspace detection for Marketplace-installed MCP servers.
+- Stop relying on the unresolved ${workspaceFolder} placeholder inside the plugin's MCP environment.
+- Resolve the active local workspace from Cursor's `WORKSPACE_FOLDER_PATHS` (with safe fallbacks).
+- Expose the resolved workspace source in workspace-state diagnostics.
+
 # Changelog
 
 All notable changes to this project are documented here.
