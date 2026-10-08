@@ -11,4 +11,5 @@ const server=fs.readFileSync(path.join(root,'server/cpanel-mcp.js'),'utf8');
 if(!server.includes('WORKSPACE_FOLDER_PATHS')) throw Error('workspace resolver missing WORKSPACE_FOLDER_PATHS support');
 cp.execFileSync(process.execPath,['--check',path.join(root,'server/cpanel-mcp.js')],{stdio:'inherit'});
 cp.execFileSync(process.execPath,[path.join(root,'tests/exclude-paths.js')],{stdio:'inherit'});
+cp.execFileSync(process.execPath,[path.join(root,'tests/remote-sync-baseline.js')],{stdio:'inherit'});
 console.log('cPanel Hosting Deploy 1.11.1 validation: PASS');
