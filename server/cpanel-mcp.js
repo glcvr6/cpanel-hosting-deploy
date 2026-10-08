@@ -625,7 +625,18 @@ async function setAccepted(c,rel,value){
   });
 }
 async function getSettings(c){return normalizeSettings(c.settings);}
-async function updateSettings(c,patch){c.settings=normalizeSettings({...normalizeSettings(c.settings),...patch,protection:{...normalizeSettings(c.settings).protection,...(patch.protection||{})}});const store=await loadStore();const idx=store.connections.findIndex(x=>x.name.toLowerCase()===c.name.toLowerCase());if(idx<0)throw new Error(`Connection not found: ${c.name}`);store.connections[idx].settings=c.settings;await saveStore(store);return c.settings;}
+async function updateSettings(c,patch){
+  return await withConnectionsStoreLock(async()=>{
+    const store=await loadStore();
+    const idx=store.connections.findIndex(x=>x.name.toLowerCase()===c.name.toLowerCase());
+    if(idx<0)throw new Error(`Connection not found: ${c.name}`);
+    const current=store.connections[idx];
+    current.settings=normalizeSettings({...normalizeSettings(current.settings),...patch,protection:{...normalizeSettings(current.settings).protection,...(patch.protection||{})}});
+    await saveStore(store);
+    c.settings=current.settings;
+    return c.settings;
+  });
+}
 function protectionWarning(c){const st=normalizeSettings(c.settings);if(st.protectionMode==='OFF')return 'Protection is OFF: only the original v1.10.3 core workflow is active.';return st.protectionMode==='SECURED'?'Protection SECURED: all protection rules are active.':'Protection CUSTOM: only selected protection rules are active.';}
 async function buildRemoteStatus(c, options={}){
   const advanceBaseline=options.advanceBaseline!==false;
@@ -1208,9 +1219,51 @@ async function callTool(name,a){
   if(name==='cpanel_get_settings'){const c=await getConnection(a.name);return {connection:c.name,settings:normalizeSettings(c.settings),warning:protectionWarning(c)};}
   if(name==='cpanel_set_settings'){const c=await getConnection(a.name);const p={};if(a.protectionMode!==undefined)p.protectionMode=a.protectionMode;if(a.protection!==undefined)p.protection=a.protection;if(a.largeFileThresholdMB!==undefined)p.largeFileThresholdBytes=Math.max(1,Number(a.largeFileThresholdMB)*1024*1024);for(const k of ['retryAttempts','reportRetention','backupRetention','autoDeploy','verifyAfterSync','verifyMethod'])if(a[k]!==undefined)p[k]=a[k];const settings=await updateSettings(c,p);return {connection:c.name,settings,warning:protectionWarning(c)};}
   if(name==='cpanel_list_connections'){const s=await loadStore();return {connections:s.connections.map(sanitizeConnection)};}
-  if(name==='cpanel_add_connection'){const s=await loadStore();if(s.connections.some(x=>x.name.toLowerCase()===String(a.name).toLowerCase()))throw new Error('A connection with that name already exists.');const c=validateConnectionInput(a);s.connections.push(c);await saveStore(s);return {connection:sanitizeConnection(c),message:'Connection added. Secret token is encrypted locally and was not returned.'};}
-  if(name==='cpanel_edit_connection'){const s=await loadStore();const c=s.connections.find(x=>x.name.toLowerCase()===String(a.name).toLowerCase());if(!c)throw new Error(`Connection not found: ${a.name}`);if(a.newName)c.name=safeName(a.newName);if(a.host){const h=safeName(a.host);if(!/^https:\/\//i.test(h))throw new Error('Host must use https://.');c.host=h.replace(/\/+$/,'');}if(a.username)c.username=safeName(a.username);if(a.remoteRoot)c.remoteRoot=normalizeRemote(a.remoteRoot);if(a.mappings)c.mappings=normalizeMappings(c.remoteRoot,a.mappings);else if(a.remoteRoot)c.mappings=normalizeMappings(c.remoteRoot,c.mappings);if(a.exclude)c.exclude=a.exclude.map(String).filter(Boolean);if(a.settings)c.settings=normalizeSettings(a.settings);if(a.apiToken)c.tokenEncrypted=protectToken(a.apiToken);await saveStore(s);return {connection:sanitizeConnection(c),message:'Connection updated. Secret token was not returned.'};}
-  if(name==='cpanel_remove_connection'){const s=await loadStore();const before=s.connections.length;s.connections=s.connections.filter(x=>x.name.toLowerCase()!==String(a.name).toLowerCase());if(s.connections.length===before)throw new Error(`Connection not found: ${a.name}`);await saveStore(s);return {removed:a.name};}
+  if(name==='cpanel_add_connection'){
+    const out=await withConnectionsStoreLock(async()=>{
+      const s=await loadStore();
+      if(s.connections.some(x=>x.name.toLowerCase()===String(a.name).toLowerCase()))throw new Error('A connection with that name already exists.');
+      const c=validateConnectionInput(a);
+      s.connections.push(c);
+      await saveStore(s);
+      return {connection:sanitizeConnection(c),message:'Connection added. Secret token is encrypted locally and was not returned.'};
+    });
+    return out;
+  }
+  if(name==='cpanel_edit_connection'){
+    const out=await withConnectionsStoreLock(async()=>{
+      const s=await loadStore();
+      const c=s.connections.find(x=>x.name.toLowerCase()===String(a.name).toLowerCase());
+      if(!c)throw new Error(`Connection not found: ${a.name}`);
+      if(a.newName){
+        const newName=safeName(a.newName);
+        if(!newName)throw new Error('Connection name cannot be empty.');
+        if(newName.toLowerCase()!==c.name.toLowerCase()&&s.connections.some(x=>x!==c&&x.name.toLowerCase()===newName.toLowerCase()))throw new Error('A connection with that name already exists.');
+        c.name=newName;
+      }
+      if(a.host){const h=safeName(a.host);if(!/^https:\/\//i.test(h))throw new Error('Host must use https://.');c.host=h.replace(/\/+$/,'');}
+      if(a.username)c.username=safeName(a.username);
+      if(a.remoteRoot)c.remoteRoot=normalizeRemote(a.remoteRoot);
+      if(a.mappings)c.mappings=normalizeMappings(c.remoteRoot,a.mappings);else if(a.remoteRoot)c.mappings=normalizeMappings(c.remoteRoot,c.mappings);
+      if(a.exclude)c.exclude=a.exclude.map(String).filter(Boolean);
+      if(a.settings)c.settings=normalizeSettings(a.settings);
+      if(a.apiToken)c.tokenEncrypted=protectToken(a.apiToken);
+      await saveStore(s);
+      return {connection:sanitizeConnection(c),message:'Connection updated. Secret token was not returned.'};
+    });
+    return out;
+  }
+  if(name==='cpanel_remove_connection'){
+    const out=await withConnectionsStoreLock(async()=>{
+      const s=await loadStore();
+      const before=s.connections.length;
+      s.connections=s.connections.filter(x=>x.name.toLowerCase()!==String(a.name).toLowerCase());
+      if(s.connections.length===before)throw new Error(`Connection not found: ${a.name}`);
+      await saveStore(s);
+      return {removed:a.name};
+    });
+    return out;
+  }
   if(name==='cpanel_list_remote_folders'){const c=await getConnection(a.name);const dir=normalizeRemote(a.path||c.remoteRoot);const root=normalizeRemote(c.remoteRoot);if(dir!==root&&!dir.startsWith(root+'/'))throw new Error('Remote folder path must stay inside the connection remote root: '+dir);const j=await apiGet(c,'Fileman','list_files',{dir});return {connection:c.name,path:dir,folders:(j.data||[]).filter(x=>String(x.type)==='dir'||String(x.type)==='directory').map(x=>String(x.file||x.name||'')).filter(Boolean)};}
   if(name==='cpanel_test_connection'){const c=await getConnection(a.name);const j=await apiGet(c,'Fileman','list_files',{dir:c.remoteRoot});return {ok:true,connection:sanitizeConnection(c),remoteRootItems:Array.isArray(j.data)?j.data.length:0,message:'cPanel connection is working.'};}
   if(name==='cpanel_workspace_state'){const c=await getConnection(a.name);return await workspaceState(c);}
