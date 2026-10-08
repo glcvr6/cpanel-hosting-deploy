@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="500" viewBox="0 0 1600 500">
+<defs>
+ <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#07101d"/><stop offset=".65" stop-color="#0d1724"/><stop offset="1" stop-color="#171008"/></linearGradient>
+ <linearGradient id="blue" x1="0" x2="1"><stop stop-color="#42a5ff"/><stop offset="1" stop-color="#00c2ff"/></linearGradient>
+ <linearGradient id="orange" x1="0" x2="1"><stop stop-color="#ffb000"/><stop offset="1" stop-color="#ff5b00"/></linearGradient>
+ <filter id="glow"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+<rect width="1600" height="500" rx="28" fill="url(#bg)"/>
+<!-- visual identity -->
+<g transform="translate(55 55)">
+ <rect width="390" height="390" rx="48" fill="#111a28" stroke="#35a7ff" stroke-width="5" filter="url(#glow)"/>
+ <path d="M195 65 300 175 195 285 90 175Z" fill="#edf5ff" stroke="#9eb2c5" stroke-width="4"/>
+ <path d="M195 65v220L90 175Z" fill="#93a4b5" opacity=".3"/>
+ <text x="195" y="350" text-anchor="middle" font-family="Arial,sans-serif" font-size="43" font-weight="700" letter-spacing="5" fill="#fff">CURSOR</text>
+</g>
+<g transform="translate(820 70)">
+ <rect width="330" height="330" rx="44" fill="#fff" stroke="#ff7600" stroke-width="5" filter="url(#glow)"/>
+ <path d="M75 100q0-45 45-45h100q45 0 45 45v45H75zM75 145h190v70q0 50-50 50H125q-50 0-50-50z" fill="#ff7600"/>
+ <text x="170" y="195" text-anchor="middle" font-family="Arial,sans-serif" font-size="78" font-weight="900" font-style="italic" fill="#fff">cP</text>
+ <text x="170" y="238" text-anchor="middle" font-family="Arial,sans-serif" font-size="34" font-weight="800" fill="#17202b">cPanel</text>
+</g>
+<!-- connection -->
+<path d="M455 165 C565 85 690 85 820 155" fill="none" stroke="url(#blue)" stroke-width="18" stroke-linecap="round" filter="url(#glow)"/>
+<path d="m790 137 42 18-39 24z" fill="#00baff"/>
+<path d="M820 335 C690 415 570 415 445 340" fill="none" stroke="url(#orange)" stroke-width="18" stroke-linecap="round" filter="url(#glow)"/>
+<path d="m475 358-42-18 39-24z" fill="#ff7900"/>
+<g transform="translate(610 190)">
+ <rect width="115" height="95" rx="12" fill="#edf7ff" stroke="#63a9dc" stroke-width="4"/>
+ <path d="M25 30h65M25 52h65M25 74h45" stroke="#4a91c5" stroke-width="8" stroke-linecap="round"/>
+</g>
+<g transform="translate(615 20)">
+ <rect width="105" height="65" rx="12" fill="#172536" stroke="#829bb4" stroke-width="3"/>
+ <circle cx="78" cy="22" r="6" fill="#22c55e"/><circle cx="92" cy="22" r="6" fill="#20a9ff"/>
+ <rect x="15" y="38" width="75" height="9" rx="4" fill="#2a3c52"/>
+</g>
+<!-- title -->
+<text x="1210" y="125" text-anchor="middle" font-family="Arial,sans-serif" font-size="58" font-weight="900" fill="#ff7900">cPanel</text>
+<text x="1210" y="192" text-anchor="middle" font-family="Arial,sans-serif" font-size="58" font-weight="800" fill="#f5f7fa">Hosting Deploy</text>
+<rect x="950" y="225" width="520" height="7" rx="3" fill="url(#blue)"/><rect x="1210" y="225" width="260" height="7" rx="3" fill="url(#orange)"/>
+<text x="1210" y="280" text-anchor="middle" font-family="Arial,sans-serif" font-size="25" fill="#b6c3d0">Safe cPanel deployment and remote synchronization for Cursor</text>
+<g font-family="Arial,sans-serif" font-size="21" font-weight="700">
+ <text x="950" y="345" fill="#54adff">↥ Deploy</text><text x="1085" y="345" fill="#ff8b18">↧ Sync</text>
+ <text x="1190" y="345" fill="#4ade80">✓ Protection</text><text x="1370" y="345" fill="#c084fc">↻ Recovery</text>
+</g>
+<text x="1210" y="405" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" fill="#8295aa" letter-spacing="2">LOCAL ↔ CPANEL • SAFE SYNC • v1.11.0</text>
+</svg>
