@@ -12,9 +12,9 @@ The plugin version must remain consistent across:
 - `CHANGELOG.md`;
 - README/release documentation where the version is explicitly referenced.
 
-## Current release: v1.13.4
+## Current release: v1.13.5
 
-v1.13.4 is a workspace-resolution safety patch. It removes the unsafe fallback to the MCP process working directory, prefers Cursor's `WORKSPACE_FOLDER_PATHS`, and fails closed with actionable guidance when the active workspace cannot be identified.
+v1.13.5 changes remote file downloads to use authenticated `Fileman::get_file_content` UAPI calls first, preserves bytes through explicit Latin-1/UTF-8 conversion, validates file size before writing, and reports diagnostics when the legacy `/download` fallback fails. It retains the workspace-resolution protections introduced in v1.13.4.
 
 ### Headline changes
 
@@ -40,7 +40,7 @@ The release CI validates:
 - plugin metadata/structure;
 - package version metadata.
 
-PR #20 contains the workspace-resolution fix and its Node.js 20/22 CI validation.
+The download transport change must pass Node.js 20/22 CI before merge and release.
 
 ## Release checklist
 
