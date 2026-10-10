@@ -67,6 +67,25 @@ function resolveWorkspace() {
 const WORKSPACE_INFO = resolveWorkspace();
 const WORKSPACE = WORKSPACE_INFO.path;
 const WORKSPACE_SOURCE = WORKSPACE_INFO.source;
+
+function assertNotCursorInstallPath(target) {
+  const absolute = path.resolve(target);
+  const roots = [
+    process.env.CURSOR_INSTALL_DIR,
+    process.env.CURSOR_PLUGIN_ROOT,
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'cursor') : null,
+    process.env.APPDATA ? path.resolve(process.env.APPDATA, '..', 'Local', 'Programs', 'cursor') : null
+  ].filter(Boolean).map(root => path.resolve(root));
+  for (const root of roots) {
+    const rel = path.relative(root, absolute);
+    const inside = rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel));
+    if (inside) {
+      throw new Error('Refusing to download into Cursor/plugin installation directory: ' + absolute +
+        '. Open the intended project folder in Cursor and reload the window.');
+    }
+  }
+}
+
 const APP_DIR = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'cPanel Hosting Deploy');
 const CONNECTIONS_FILE = path.join(APP_DIR, 'connections.json');
 const DEFAULT_EXCLUDE = ['node_modules', '.git', '.env', 'logs'];
@@ -1397,6 +1416,7 @@ async function callTool(name,a){
       if(m.enabled===false) continue;
       const remotePath=normalizeRemote(m.remote);
       const localPath=path.resolve(WORKSPACE,...String(m.local).split('/'));
+      assertNotCursorInstallPath(localPath);
       if(remotePath!==normalizeRemote(c.remoteRoot)&&!remotePath.startsWith(normalizeRemote(c.remoteRoot)+'/')) throw new Error('Mapped remote folder is outside the configured remote root: '+remotePath);
       await assertSafeLocalPath(localPath);
       mappings.push({remotePath,localMappedPath:localPath,localRelativePath:String(m.local)});
@@ -1409,12 +1429,12 @@ async function callTool(name,a){
       workspace:WORKSPACE,
       workspaceSource:WORKSPACE_SOURCE,
       mappings,
-      warning:'This download can overwrite existing local files at the displayed paths. Nothing has been downloaded yet.',
+      warning:'Existing local files at the displayed paths may be overwritten. Nothing has been downloaded yet.',
       message:'Review every remotePath and localMappedPath. Ask the user for explicit approval before calling cpanel_download again with confirm=true.'
     };
     return await withOperationLock(c,'download',async()=>{const files=[];const downloaded=[];const errors=[];async function walk(remoteDir,localRoot,remoteRoot){const j=await apiGet(c,'Fileman','list_files',{dir:remoteDir});for(const item of (j.data||[])){const nm=String(item.file||item.name||'');if(!nm)continue;const rp=normalizeRemote(`${remoteDir}/${nm}`);const tail=rp.slice(remoteRoot.length).replace(/^\/+/, '');const rel=path.posix.join(localRoot,tail);if(excluded(rel,c.exclude))continue;if(String(item.type)==='dir'||String(item.type)==='directory'){await walk(rp,localRoot,remoteRoot);continue;}if(!allowedRemote(c,rp))continue;files.push({rp,rel});}}
     for(const m of (c.mappings||[])){if(m.enabled===false)continue;await assertSafeLocalPath(path.join(WORKSPACE,...m.local.split('/')));await walk(normalizeRemote(m.remote),m.local,normalizeRemote(m.remote));}
-    let next=0;const workers=Array.from({length:6},async()=>{while(true){const i=next++;if(i>=files.length)return;const {rp,rel}=files[i];try{const u=new URL(`${c.host}/download`);u.searchParams.set('file',rp);const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});if(!r.ok)throw new Error(`HTTP ${r.status}`);const b=Buffer.from(await r.arrayBuffer());const local=path.join(WORKSPACE,...rel.split('/'));await assertSafeLocalPath(local);await withManifestLock(async()=>{
+    let next=0;const workers=Array.from({length:6},async()=>{while(true){const i=next++;if(i>=files.length)return;const {rp,rel}=files[i];try{const u=new URL(`${c.host}/download`);u.searchParams.set('file',rp);const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});if(!r.ok)throw new Error(`HTTP ${r.status}`);const b=Buffer.from(await r.arrayBuffer());const local=path.join(WORKSPACE,...rel.split('/'));assertNotCursorInstallPath(local);await assertSafeLocalPath(local);await withManifestLock(async()=>{
         await fsp.mkdir(path.dirname(local),{recursive:true});
         await fsp.writeFile(local,b);
         const manifest=await loadManifest();
