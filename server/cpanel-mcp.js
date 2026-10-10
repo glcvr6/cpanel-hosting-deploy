@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const { AsyncLocalStorage } = require('async_hooks');
 
-const VERSION = '1.13.4';
+const VERSION = '1.13.5';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];

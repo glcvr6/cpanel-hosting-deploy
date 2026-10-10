@@ -43,5 +43,5 @@ assert(downloadStart>=0&&downloadEnd>downloadStart,'download handler boundaries 
 assert(!downloadBlock.includes("await Promise.all(workers);await saveManifest(manifest)"),'download handler must not perform a stale final manifest save after worker transactions');
 assert(s.includes("st.isSymbolicLink()"),'symbolic links must be rejected in deployment paths');
 assert(s.includes("AbortSignal.timeout(120000)"),'cPanel API calls must have bounded timeouts');
-assert(s.includes("const VERSION = '1.13.4';"),'server version must match the current release');
+assert(s.includes("const VERSION = '1.13.5';"),'server version must match the current release');
 console.log('Operation safety regression: PASS');
