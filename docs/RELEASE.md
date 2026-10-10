@@ -40,7 +40,7 @@ The release CI validates:
 - plugin metadata/structure;
 - package version metadata.
 
-The latest release PR (#18) completed CI successfully before merge.
+PR #20 contains the workspace-resolution fix and its Node.js 20/22 CI validation.
 
 ## Release checklist
 
