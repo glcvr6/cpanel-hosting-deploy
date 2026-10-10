@@ -12,9 +12,9 @@ The plugin version must remain consistent across:
 - `CHANGELOG.md`;
 - README/release documentation where the version is explicitly referenced.
 
-## Current release: v1.13.2
+## Current release: v1.13.3
 
-v1.13.2 is a reliability and runtime-correctness release on top of the 1.11.x–1.13.x safety hardening series.
+v1.13.3 is a workspace-resolution safety patch. It removes the unsafe fallback to the MCP process working directory, prefers Cursor's `WORKSPACE_FOLDER_PATHS`, and fails closed with actionable guidance when the active workspace cannot be identified.
 
 ### Headline changes
 
@@ -26,7 +26,9 @@ v1.13.2 is a reliability and runtime-correctness release on top of the 1.11.x–
 - Local workspace/path and symlink protection.
 - Bounded cPanel API requests.
 - Unique remote backup naming and retention.
-- Explicit download runtime fix removing a stale manifest write.
+- Workspace detection prefers Cursor's `WORKSPACE_FOLDER_PATHS` variable.
+- Remote downloads fail closed when active workspace context is missing instead of targeting Cursor/plugin installation directories.
+- Regression tests cover missing workspace context, invalid paths, and project paths containing spaces.
 
 ### Validation status
 
@@ -38,7 +40,7 @@ The release CI validates:
 - plugin metadata/structure;
 - package version metadata.
 
-The latest release PR (#18) completed CI successfully before merge.
+PR #20 contains the workspace-resolution fix and its Node.js 20/22 CI validation.
 
 ## Release checklist
 

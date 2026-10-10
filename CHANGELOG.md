@@ -1,3 +1,9 @@
+## [1.13.3] - 2026-10-10
+
+### Fixed
+- Fail closed when Cursor does not provide a valid active workspace instead of resolving downloads against the MCP/plugin working directory.
+- Prefer Cursor's `WORKSPACE_FOLDER_PATHS` workspace context and add regression tests for missing, invalid, and space-containing workspace paths.
+
 ## [1.13.2] - 2026-10-08
 
 ### Fixed
