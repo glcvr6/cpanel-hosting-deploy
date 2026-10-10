@@ -12,9 +12,9 @@ The plugin version must remain consistent across:
 - `CHANGELOG.md`;
 - README/release documentation where the version is explicitly referenced.
 
-## Current release: v1.13.5
+## Current release: v1.13.6
 
-v1.13.5 is a status-scope reliability patch. Local Status and both protected and unprotected Remote Status paths now compare only files belonging to enabled folder mappings. Stale manifest entries for disabled mappings remain preserved and no longer cause unrelated folders to block status results.
+v1.13.6 fixes remote downloads with authenticated Fileman UAPI reads, byte-count validation, and explicit destination preview/confirmation. Downloads require the matching confirmation token from the preview, reject Cursor/plugin installation destinations, and remain within the active workspace. The release includes the v1.13.5 enabled-mapping status-scope fixes.
 
 ### Headline changes
 
@@ -25,10 +25,13 @@ v1.13.5 is a status-scope reliability patch. Local Status and both protected and
 - Remote snapshot revalidation before sensitive actions.
 - Local workspace/path and symlink protection.
 - Bounded cPanel API requests.
+- Authenticated UAPI-first remote downloads with byte-count validation and HTTP fallback diagnostics.
+- Explicit destination preview and confirmation-token validation before download writes.
+- Guardrails preventing downloads into Cursor/plugin installation directories or outside the active workspace.
 - Unique remote backup naming and retention.
 - Workspace detection prefers Cursor's `WORKSPACE_FOLDER_PATHS` variable.
 - Remote downloads accept a validated explicit project path when active workspace context is missing, and fail closed for invalid paths or Cursor/plugin installation directories.
-- Regression tests cover missing workspace context, invalid paths, and project paths containing spaces.
+- Regression tests cover missing workspace context, invalid paths, project paths containing spaces, UAPI download transport, and explicit destination confirmation.
 - Regression tests verify Local Status and protected/unprotected Remote Status skip disabled-mapping manifest entries.
 
 ### Validation status
