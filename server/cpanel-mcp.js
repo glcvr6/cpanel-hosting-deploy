@@ -49,15 +49,29 @@ function resolveWorkspace() {
     }
   }
 
-  // In Cursor a plugin MCP server normally runs with the plugin cwd, so do not
-  // silently mistake the plugin directory for the user's project.
+  // Marketplace-installed MCP servers run with cwd set to the plugin installation
+  // directory. Never treat cwd as the user's project: doing so can direct downloads
+  // into Cursor's own installation folder. Also reject explicit env candidates that
+  // resolve to the plugin root, then fail closed if no real workspace was provided.
   const cwd = path.resolve(process.cwd());
   const pluginRoot = process.env.CURSOR_PLUGIN_ROOT ? path.resolve(process.env.CURSOR_PLUGIN_ROOT) : null;
-  if (!pluginRoot || cwd !== pluginRoot) return {path: cwd, source:'process.cwd()'};
+
+  for (const [source, raw] of sources) {
+    for (const candidate of parseWorkspaceCandidates(raw)) {
+      const resolved = path.resolve(candidate.replace(/^"|"$/g, ''));
+      if (pluginRoot && resolved === pluginRoot) continue;
+      if (pluginRoot && cwd === pluginRoot && resolved === cwd) continue;
+      try {
+        if (fs.statSync(resolved).isDirectory()) return {path: resolved, source};
+      } catch (_) {}
+    }
+  }
 
   throw new Error(
-    'Unable to determine the Cursor workspace. Cursor did not provide WORKSPACE_FOLDER_PATHS/CURSOR_PROJECT_DIR. ' +
-    'Restart Cursor and reload the plugin, then retry.'
+    'Unable to determine the active Cursor workspace. No valid project folder was provided through ' +
+    'CURSOR_PROJECT_DIR, WORKSPACE_FOLDER_PATHS, CURSOR_WORKSPACE, or VSCODE_CWD. ' +
+    'The plugin will not use its own working directory for file operations. Open the intended project ' +
+    'folder in Cursor, then restart/reload Cursor and retry.'
   );
 }
 
