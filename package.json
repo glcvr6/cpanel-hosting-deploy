@@ -1,6 +1,6 @@
 {
   "name": "cpanel-hosting-deploy",
-  "version": "1.13.2",
+  "version": "1.13.3",
   "private": false,
   "description": "Safe cPanel deployment for Cursor with configurable protection modes",
   "license": "MIT",
