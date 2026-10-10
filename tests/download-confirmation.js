@@ -14,6 +14,9 @@ assert(block.includes('remotePath'),'preview must display each mapped remote pat
 assert(block.includes('localMappedPath:localPath'),'preview must display each absolute local mapped path');
 assert(block.includes('existing local files at the displayed paths may be overwritten'),'preview must warn about overwrites');
 assert(block.indexOf('if(a.confirm!==true) return {')<block.indexOf("withOperationLock(c,'download'"),'preview must occur before the download lock and transfer');
+assert(block.includes("assertNotCursorInstallPath(localPath)"),'preview must reject Cursor/plugin installation paths');
 assert(block.includes("await assertSafeLocalPath(localPath)"),'preview must validate local path safety');
+assert(s.includes('function assertNotCursorInstallPath(target)'),'installation directory guard missing');
+assert(s.includes('Refusing to download into Cursor/plugin installation directory'),'installation directory guard must fail closed');
 assert(block.includes("throw new Error('No enabled folder mappings are configured for this connection.')"),'download must reject empty mappings');
 console.log('download-confirmation: PASS');
