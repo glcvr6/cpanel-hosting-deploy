@@ -40,15 +40,6 @@ function resolveWorkspace() {
     ['VSCODE_CWD', process.env.VSCODE_CWD]
   ];
 
-  for (const [source, raw] of sources) {
-    for (const candidate of parseWorkspaceCandidates(raw)) {
-      const resolved = path.resolve(candidate.replace(/^"|"$/g, ''));
-      try {
-        if (fs.statSync(resolved).isDirectory()) return {path: resolved, source};
-      } catch (_) {}
-    }
-  }
-
   // Marketplace-installed MCP servers run with cwd set to the plugin installation
   // directory. Never treat cwd as the user's project: doing so can direct downloads
   // into Cursor's own installation folder. Also reject explicit env candidates that
