@@ -23,4 +23,5 @@ cp.execFileSync(process.execPath,[path.join(root,'tests/connections-store-safety
 cp.execFileSync(process.execPath,[path.join(root,'tests/remote-revalidation.js')],{stdio:'inherit'});
 cp.execFileSync(process.execPath,[path.join(root,'tests/remote-path-safety.js')],{stdio:'inherit'});
 cp.execFileSync(process.execPath,[path.join(root,'tests/local-fs-operation-safety.js')],{stdio:'inherit'});
+cp.execFileSync(process.execPath,[path.join(root,'tests/workspace-resolution.js')],{stdio:'inherit'});
 console.log('cPanel Hosting Deploy 1.13.2 validation: PASS');
