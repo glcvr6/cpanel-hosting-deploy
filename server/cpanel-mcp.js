@@ -33,9 +33,12 @@ function parseWorkspaceCandidates(raw) {
 }
 
 function resolveWorkspace() {
+  // WORKSPACE_FOLDER_PATHS is the Cursor-provided workspace context for local
+  // MCP servers. Prefer it over generic aliases that may be inherited from
+  // shells, launchers, or another editor window.
   const sources = [
-    ['CURSOR_PROJECT_DIR', process.env.CURSOR_PROJECT_DIR],
     ['WORKSPACE_FOLDER_PATHS', process.env.WORKSPACE_FOLDER_PATHS],
+    ['CURSOR_PROJECT_DIR', process.env.CURSOR_PROJECT_DIR],
     ['CURSOR_WORKSPACE', process.env.CURSOR_WORKSPACE],
     ['VSCODE_CWD', process.env.VSCODE_CWD]
   ];
@@ -49,15 +52,15 @@ function resolveWorkspace() {
     }
   }
 
-  // In Cursor a plugin MCP server normally runs with the plugin cwd, so do not
-  // silently mistake the plugin directory for the user's project.
-  const cwd = path.resolve(process.cwd());
-  const pluginRoot = process.env.CURSOR_PLUGIN_ROOT ? path.resolve(process.env.CURSOR_PLUGIN_ROOT) : null;
-  if (!pluginRoot || cwd !== pluginRoot) return {path: cwd, source:'process.cwd()'};
-
+  // A plugin MCP server may run with cwd set to the plugin installation
+  // directory (or even Cursor's application directory). Neither is evidence
+  // of the user's active project. Fail closed instead of treating cwd as the
+  // workspace and risking writes into the wrong folder.
   throw new Error(
-    'Unable to determine the Cursor workspace. Cursor did not provide WORKSPACE_FOLDER_PATHS/CURSOR_PROJECT_DIR. ' +
-    'Restart Cursor and reload the plugin, then retry.'
+    'Unable to determine the Cursor workspace. Cursor did not provide a valid ' +
+    'WORKSPACE_FOLDER_PATHS, CURSOR_PROJECT_DIR, CURSOR_WORKSPACE, or VSCODE_CWD. ' +
+    'Refusing to use the MCP working directory because it may be the plugin or Cursor installation folder. ' +
+    'Open the intended project folder in Cursor, run Developer: Reload Window, and retry.'
   );
 }
 
