@@ -32,7 +32,7 @@ function run(input,extraEnv={},cwd=pluginRoot){
     timeout:10000
   });
 }
-function line(obj){return JSON.stringify(obj)+'\\n';}
+function line(obj){return JSON.stringify(obj)+'\n';}
 
 try{
   // Missing workspace context no longer prevents startup or falls back to cwd.
@@ -44,7 +44,7 @@ try{
   // The download schema exposes an explicit workspace parameter.
   const list=run(line({jsonrpc:'2.0',id:1,method:'tools/list'}));
   assert.strictEqual(list.status,0,list.stderr||'tools/list failed');
-  const toolsResponse=JSON.parse(list.stdout.trim().split('\\n').at(-1));
+  const toolsResponse=JSON.parse(list.stdout.trim().split('\n').at(-1));
   const download=toolsResponse.result.tools.find(t=>t.name==='cpanel_download');
   assert(download && download.inputSchema.properties.workspace,'download schema must accept an explicit workspace');
 
