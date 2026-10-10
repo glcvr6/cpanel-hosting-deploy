@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const { AsyncLocalStorage } = require('async_hooks');
 
-const VERSION = '1.13.4';
+const VERSION = '1.13.5';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];
@@ -341,10 +341,10 @@ async function apiGetFileContent(c,remotePath) {
 
 function responsePreview(body) {
   return String(body||'')
-    .replace(/<script\\b[^>]*>[\\s\\S]*?<\\/script>/gi,' ')
-    .replace(/<style\\b[^>]*>[\\s\\S]*?<\\/style>/gi,' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ')
     .replace(/<[^>]*>/g,' ')
-    .replace(/\\s+/g,' ')
+    .replace(/\s+/g,' ')
     .trim()
     .slice(0,300);
 }
