@@ -1,3 +1,9 @@
+## Unreleased
+
+### Fixed
+- Fail closed when Cursor does not provide a valid active workspace; never fall back to the MCP server's working directory, which may be Cursor's installation folder.
+- Reject the plugin installation root as a workspace and add regression tests for missing, unresolved, invalid, and valid workspace environment variables.
+
 ## [1.13.2] - 2026-10-08
 
 ### Fixed
