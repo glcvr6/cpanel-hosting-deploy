@@ -14,7 +14,7 @@ The plugin version must remain consistent across:
 
 ## Current release: v1.13.3
 
-v1.13.3 is a workspace-resolution safety patch. It removes the unsafe fallback to the MCP process working directory, prefers Cursor's `WORKSPACE_FOLDER_PATHS`, and fails closed with actionable guidance when the active workspace cannot be identified.
+v1.13.3 is a workspace-resolution safety patch. It removes the unsafe fallback to the MCP process working directory, prefers Cursor's `WORKSPACE_FOLDER_PATHS`, fails closed when the active workspace cannot be identified, and requires explicit approval after showing remote and absolute local mapped paths before downloading.
 
 ### Headline changes
 
@@ -28,7 +28,7 @@ v1.13.3 is a workspace-resolution safety patch. It removes the unsafe fallback t
 - Unique remote backup naming and retention.
 - Workspace detection prefers Cursor's `WORKSPACE_FOLDER_PATHS` variable.
 - Remote downloads fail closed when active workspace context is missing instead of targeting Cursor/plugin installation directories.
-- Regression tests cover missing workspace context, invalid paths, and project paths containing spaces.
+- Regression tests cover missing workspace context, invalid paths, project paths containing spaces, and explicit download confirmation.
 
 ### Validation status
 
