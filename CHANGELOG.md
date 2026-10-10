@@ -1,3 +1,10 @@
+## [1.13.5] - 2026-10-10
+
+### Fixed
+- Download files through authenticated `Fileman::get_file_content` UAPI first instead of relying on the session-oriented `/download` UI route.
+- Preserve original file bytes through Latin-1-to-UTF-8 JSON transport, validate returned file size before writing, and keep the legacy route only as a size-limit fallback with useful HTTP response diagnostics.
+- Download sequentially and report which transport succeeded for each batch.
+
 ## [1.13.4] - 2026-10-10
 
 ### Fixed
