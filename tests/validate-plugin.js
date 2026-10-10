@@ -13,6 +13,7 @@ cp.execFileSync(process.execPath,['--check',path.join(root,'server/cpanel-mcp.js
 cp.execFileSync(process.execPath,[path.join(root,'tests/exclude-paths.js')],{stdio:'inherit'});
 cp.execFileSync(process.execPath,[path.join(root,'tests/remote-sync-baseline.js')],{stdio:'inherit'});
 cp.execFileSync(process.execPath,[path.join(root,'tests/remote-status-mapping-scope.js')],{stdio:'inherit'});
+cp.execFileSync(process.execPath,[path.join(root,'tests/local-status-mapping-scope.js')],{stdio:'inherit'});
 cp.execFileSync(process.execPath,[path.join(root,'tests/protection-overwrite.js')],{stdio:'inherit'});
 cp.execFileSync(process.execPath,[path.join(root,'tests/protection-backups.js')],{stdio:'inherit'});
 cp.execFileSync(process.execPath,[path.join(root,'tests/transfer-retry.js')],{stdio:'inherit'});
