@@ -1,3 +1,16 @@
+## [1.13.6] - 2026-10-10
+
+### Fixed
+- Use authenticated Fileman `get_file_content` UAPI for remote downloads first, preserve original bytes, validate downloaded sizes, and report useful fallback diagnostics.
+
+### Added
+- Require a preview of the exact remote and absolute local destinations before downloads; a matching confirmation token is required to proceed, and confirmation is invalidated if the workspace or mappings change.
+- Reject download targets inside Cursor or plugin installation directories and keep all mapped writes inside the active workspace.
+- Add regression checks for UAPI downloads and explicit destination confirmation.
+
+### Validation
+- The maintainer confirmed that all files downloaded successfully in a real cPanel test of the UAPI download implementation.
+
 ## [1.13.5] - 2026-10-10
 
 ### Fixed

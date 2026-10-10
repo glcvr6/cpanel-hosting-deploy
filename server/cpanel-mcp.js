@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const { AsyncLocalStorage } = require('async_hooks');
 
-const VERSION = '1.13.5';
+const VERSION = '1.13.6';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];
@@ -72,6 +72,27 @@ function isInsidePluginInstall(resolved) {
   if (!pluginRoot) return false;
   const rel = path.relative(pluginRoot, resolved);
   return rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel));
+}
+
+function assertNotCursorInstallPath(target) {
+  const absolute = path.resolve(target);
+  const roots = [
+    process.env.CURSOR_INSTALL_DIR,
+    process.env.CURSOR_PLUGIN_ROOT,
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'cursor') : null,
+    process.env.APPDATA ? path.resolve(process.env.APPDATA, '..', 'Local', 'Programs', 'cursor') : null
+  ].filter(Boolean).map(root => path.resolve(root));
+  for (const root of roots) {
+    const rel = path.relative(root, absolute);
+    const inside = rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel));
+    if (inside) {
+      throw new Error('Refusing to download into Cursor/plugin installation directory: ' + absolute +
+        '. Open the intended project folder in Cursor and reload the window.');
+    }
+  }
+  if (isCursorInstallDirectory(absolute)) {
+    throw new Error('Refusing to download into Cursor application installation directory: ' + absolute);
+  }
 }
 
 function currentWorkspace() {
@@ -304,6 +325,82 @@ async function apiGet(c,module,fn,params={}) {
   if (!r.ok || j.status !== 1) throw new Error((j.errors||[]).join('; ') || `cPanel API HTTP ${r.status}`);
   return j;
 }
+async function apiGetFileContent(c,remotePath) {
+  const rp=normalizeRemote(remotePath);
+  const u=new URL(c.host + '/execute/Fileman/get_file_content');
+  u.searchParams.set('dir',path.posix.dirname(rp));
+  u.searchParams.set('file',path.posix.basename(rp));
+  // Latin-1 maps every source byte to one code point. The UAPI response is
+  // JSON/UTF-8, so convert the returned byte-valued string back to raw bytes.
+  u.searchParams.set('from_charset','ISO-8859-1');
+  u.searchParams.set('to_charset','UTF-8');
+  const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});
+  const text=await r.text();
+  let j;
+  try { j=JSON.parse(text); }
+  catch (_) { throw new Error('Fileman::get_file_content returned non-JSON response (HTTP ' + r.status + ').'); }
+  const result=j.result && typeof j.result==='object' ? j.result : j;
+  const status=result.status ?? j.status;
+  const errors=result.errors ?? j.errors ?? [];
+  if(!r.ok || Number(status)!==1) {
+    const detail=Array.isArray(errors)?errors.filter(Boolean).join('; '):String(errors||'');
+    throw new Error('Fileman::get_file_content HTTP ' + r.status + (detail ? ': ' + detail : ''));
+  }
+  const data=result.data ?? j.data;
+  const item=Array.isArray(data)?data[0]:data;
+  if(!item || typeof item.content!=='string') {
+    throw new Error('Fileman::get_file_content succeeded but did not return a content string.');
+  }
+  for(let i=0;i<item.content.length;i++) {
+    if(item.content.charCodeAt(i)>255) {
+      throw new Error('Fileman::get_file_content returned characters outside the byte-preserving Latin-1 range; refusing to write potentially corrupted content.');
+    }
+  }
+  return Buffer.from(item.content,'latin1');
+}
+
+function responsePreview(body) {
+  return String(body||'')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ')
+    .replace(/<[^>]*>/g,' ')
+    .replace(/\s+/g,' ')
+    .trim()
+    .slice(0,300);
+}
+
+async function downloadRemoteFile(c,remotePath,expectedSize) {
+  let apiError='';
+  try {
+    const buffer=await apiGetFileContent(c,remotePath);
+    if(expectedSize!==undefined && expectedSize!==null && expectedSize!=='' &&
+      Number.isFinite(Number(expectedSize)) && buffer.length!==Number(expectedSize)) {
+      throw new Error('UAPI content size mismatch: expected ' + Number(expectedSize) + ' bytes, received ' + buffer.length + '; refusing to save a potentially corrupted file.');
+    }
+    return {buffer,method:'uapi-file-content'};
+  } catch(e) {
+    apiError=String(e.message||e);
+  }
+
+  // Fallback for hosts that impose a UAPI file-content size limit. The classic
+  // File Manager route may require a cPanel session and can return 403 when
+  // called with an API token alone, so expose the response instead of hiding it.
+  const u=new URL(c.host + '/download');
+  u.searchParams.set('file',normalizeRemote(remotePath));
+  const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});
+  if(!r.ok) {
+    const body=await r.text().catch(()=> '');
+    const preview=responsePreview(body);
+    throw new Error(apiError + '; fallback /download returned HTTP ' + r.status + (preview ? ': ' + preview : ''));
+  }
+  const buffer=Buffer.from(await r.arrayBuffer());
+  if(expectedSize!==undefined && expectedSize!==null && expectedSize!=='' &&
+    Number.isFinite(Number(expectedSize)) && buffer.length!==Number(expectedSize)) {
+    throw new Error('Fallback /download size mismatch: expected ' + Number(expectedSize) + ' bytes, received ' + buffer.length + '.');
+  }
+  return {buffer,method:'legacy-download-fallback'};
+}
+
 async function api2FileOp(c,op,sourcefiles){
   const u=new URL(c.host+'/json-api/cpanel');
   u.searchParams.set('cpanel_jsonapi_user',c.username);
@@ -1331,7 +1428,7 @@ const TOOLS=[ {name:'cpanel_get_settings',description:'Get per-connection Protec
  {name:'cpanel_local_upload',description:'Explicit full local-to-remote upload. Protection may require OVERWRITE when existing hosting files will be replaced; new local files are added after confirmation.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'},confirmation:{type:'string'}},required:['name','confirm']}},
  {name:'cpanel_remote_status',description:'Read-only remote-to-local comparison. Detect REMOTE NEW, REMOTE CHANGED, and REMOTE DELETED using a saved remote metadata baseline. Never modifies local files except the remote metadata observation file.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}},
  {name:'cpanel_remote_sync',description:'Synchronize explicitly selected remote changes into the local workspace. REMOTE CHANGED requires OVERWRITE_LOCAL confirmation; REMOTE DELETED requires DELETE_LOCAL confirmation.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'},actions:{type:'array',items:{type:'object',properties:{path:{type:'string'},action:{type:'string',enum:['sync','keep']},confirmation:{type:'string'}},required:['path','action']}}},required:['name','confirm']}},
- {name:'cpanel_download',description:'Explicitly download configured remote folders. Pass workspace as the absolute path of the active local project when Cursor workspace context is unavailable. This can overwrite local files; use only when the user explicitly requests a download/restore.',inputSchema:{type:'object',properties:{name:{type:'string'},workspace:{type:'string',description:'Absolute path to the currently open local project folder; required if Cursor workspace context is unavailable.'}},required:['name']}}
+ {name:'cpanel_download',description:'Preview the exact remote-to-local download destinations first. Requires explicit user approval and the matching confirmationToken from the preview; existing local files may be overwritten.',inputSchema:{type:'object',properties:{name:{type:'string'},workspace:{type:'string',description:'Absolute path to the currently open local project folder; required if Cursor workspace context is unavailable.'},confirm:{type:'boolean',description:'Set true only after the user explicitly approves the preview.'},confirmationToken:{type:'string',description:'Exact token returned by the preview; prevents confirmation against changed mappings or workspace.'}},required:['name']}}
 ];
 
 async function callTool(name,a){
@@ -1445,15 +1542,111 @@ async function callToolInContext(name,a){
   }
   if(name==='cpanel_remote_status'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);if(st.protectionMode==='OFF') return await buildRemoteStatus(c);const r=await buildRemoteStatusProtected(c);r.protection=protectionWarning(c);return r;}
   if(name==='cpanel_remote_sync'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);const r=await remoteSync(c,a.actions||[],Boolean(a.confirm));if(st.protectionMode==='OFF') return r;r.protection=protectionWarning(c);if(r.requiresConfirmation)return r;if(st.verifyAfterSync&&protectionEnabled(c,'contentVerification')){r.verification='requested';}return r;}
-  if(name==='cpanel_download'){const c=await getConnection(a.name);return await withOperationLock(c,'download',async()=>{const files=[];const downloaded=[];const errors=[];async function walk(remoteDir,localRoot,remoteRoot){const j=await apiGet(c,'Fileman','list_files',{dir:remoteDir});for(const item of (j.data||[])){const nm=String(item.file||item.name||'');if(!nm)continue;const rp=normalizeRemote(`${remoteDir}/${nm}`);const tail=rp.slice(remoteRoot.length).replace(/^\/+/, '');const rel=path.posix.join(localRoot,tail);if(excluded(rel,c.exclude))continue;if(String(item.type)==='dir'||String(item.type)==='directory'){await walk(rp,localRoot,remoteRoot);continue;}if(!allowedRemote(c,rp))continue;files.push({rp,rel});}}
-    for(const m of (c.mappings||[])){if(m.enabled===false)continue;await assertSafeLocalPath(path.join(currentWorkspace(),...m.local.split('/')));await walk(normalizeRemote(m.remote),m.local,normalizeRemote(m.remote));}
-    let next=0;const workers=Array.from({length:6},async()=>{while(true){const i=next++;if(i>=files.length)return;const {rp,rel}=files[i];try{const u=new URL(`${c.host}/download`);u.searchParams.set('file',rp);const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});if(!r.ok)throw new Error(`HTTP ${r.status}`);const b=Buffer.from(await r.arrayBuffer());const local=path.join(currentWorkspace(),...rel.split('/'));await assertSafeLocalPath(local);await withManifestLock(async()=>{
-        await fsp.mkdir(path.dirname(local),{recursive:true});
-        await fsp.writeFile(local,b);
-        const manifest=await loadManifest();
-        manifest[rel]=sha256(local);
-        await saveManifest(manifest);
-      });downloaded.push(rel);}catch(e){errors.push({path:rel,error:String(e.message||e)});}}});await Promise.all(workers);const result={downloaded,count:downloaded.length,failed:errors,message:errors.length?`Download completed with ${errors.length} failed file(s).`:'Download completed successfully.',warning:'Download was explicitly requested. Existing local files may be overwritten.'};return result;});}
+  if(name==='cpanel_download'){
+    const c=await getConnection(a.name);
+    const workspace=currentWorkspace();
+    const workspaceRoot=path.resolve(workspace);
+    const workspaceContext=WORKSPACE_CONTEXT.getStore();
+    const workspaceSource=workspaceContext&&workspaceContext.source?workspaceContext.source:WORKSPACE_SOURCE;
+    const mappings=[];
+    for(const m of (c.mappings||[])){
+      if(m.enabled===false) continue;
+      const remotePath=normalizeRemote(m.remote);
+      const remoteRoot=normalizeRemote(c.remoteRoot);
+      if(remotePath!==remoteRoot&&!remotePath.startsWith(remoteRoot+'/')) {
+        throw new Error('Mapped remote folder is outside the configured remote root: '+remotePath);
+      }
+      const localRelativePath=normalizeLocalPath(m.local);
+      const localMappedPath=path.resolve(workspaceRoot,...localRelativePath.split('/'));
+      const rel=path.relative(workspaceRoot,localMappedPath);
+      if(!rel||rel==='..'||rel.startsWith('..'+path.sep)||path.isAbsolute(rel)) {
+        throw new Error('Mapped local folder must stay inside the active workspace: '+localMappedPath);
+      }
+      assertNotCursorInstallPath(localMappedPath);
+      await assertSafeLocalPath(localMappedPath);
+      mappings.push({remotePath,localMappedPath,localRelativePath});
+    }
+    if(!mappings.length) throw new Error('No enabled folder mappings are configured for this connection.');
+    const confirmationToken=crypto.createHash('sha256').update(JSON.stringify({
+      connection:c.name,
+      workspace:workspaceRoot,
+      mappings:mappings.map(({remotePath,localMappedPath,localRelativePath})=>({remotePath,localMappedPath,localRelativePath}))
+    })).digest('hex');
+    if(a.confirm!==true || a.confirmationToken!==confirmationToken) {
+      return {
+        requiresConfirmation:true,
+        operation:'remote-download',
+        connection:c.name,
+        workspace:workspaceRoot,
+        workspaceSource,
+        mappings,
+        confirmationToken,
+        warning:'Existing local files at the displayed paths may be overwritten. Nothing has been downloaded yet.',
+        message:a.confirm===true
+          ? 'The workspace or mappings changed since the preview, or the confirmation token is missing/invalid. Review this fresh preview and ask the user to approve these exact paths before retrying.'
+          : 'Review every remotePath and localMappedPath. Ask the user for explicit approval, then call cpanel_download again with confirm=true and this exact confirmationToken.'
+      };
+    }
+    return await withOperationLock(c,'download',async()=>{
+      const files=[];
+      const downloaded=[];
+      const errors=[];
+      const downloadMethods={};
+      async function walk(remoteDir,localRoot,remoteRoot){
+        const j=await apiGet(c,'Fileman','list_files',{dir:remoteDir});
+        for(const item of (j.data||[])){
+          const nm=String(item.file||item.name||'');
+          if(!nm) continue;
+          const rp=normalizeRemote(remoteDir+'/'+nm);
+          const tail=rp.slice(remoteRoot.length).replace(/^\/+/, '');
+          const rel=path.posix.join(localRoot,tail);
+          if(excluded(rel,c.exclude)) continue;
+          if(String(item.type)==='dir'||String(item.type)==='directory'){
+            await walk(rp,localRoot,remoteRoot);
+            continue;
+          }
+          if(!allowedRemote(c,rp)) continue;
+          files.push({rp,rel,size:item.size});
+        }
+      }
+      for(const m of (c.mappings||[])){
+        if(m.enabled===false) continue;
+        await assertSafeLocalPath(path.join(workspaceRoot,...m.local.split('/')));
+        await walk(normalizeRemote(m.remote),m.local,normalizeRemote(m.remote));
+      }
+      for(const {rp,rel,size} of files){
+        try{
+          const result=await downloadRemoteFile(c,rp,size);
+          const local=path.resolve(workspaceRoot,...rel.split('/'));
+          const relFromWorkspace=path.relative(workspaceRoot,local);
+          if(!relFromWorkspace||relFromWorkspace==='..'||relFromWorkspace.startsWith('..'+path.sep)||path.isAbsolute(relFromWorkspace)) {
+            throw new Error('Refusing to write outside the active workspace: '+local);
+          }
+          assertNotCursorInstallPath(local);
+          await assertSafeLocalPath(local);
+          await withManifestLock(async()=>{
+            await fsp.mkdir(path.dirname(local),{recursive:true});
+            await fsp.writeFile(local,result.buffer);
+            const manifest=await loadManifest();
+            manifest[rel]=sha256(local);
+            await saveManifest(manifest);
+          });
+          downloaded.push(rel);
+          downloadMethods[result.method]=(downloadMethods[result.method]||0)+1;
+        }catch(e){
+          errors.push({path:rel,error:String(e.message||e)});
+        }
+      }
+      return {
+        downloaded,
+        count:downloaded.length,
+        failed:errors,
+        downloadMethods,
+        message:errors.length?'Download completed with '+errors.length+' failed file(s).':'Download completed successfully.',
+        warning:'Download was explicitly requested. Existing local files may be overwritten.'
+      };
+    });
+  }
   throw new Error(`Unknown tool: ${name}`);
 }
 

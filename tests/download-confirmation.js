@@ -1,0 +1,26 @@
+const fs=require('fs');
+const path=require('path');
+const server=fs.readFileSync(path.join(__dirname,'..','server','cpanel-mcp.js'),'utf8');
+function assert(ok,msg){if(!ok)throw new Error(msg);}
+const schemaAt=server.indexOf("{name:'cpanel_download'");
+const schemaEnd=server.indexOf("\n];",schemaAt);
+const schema=server.slice(schemaAt,schemaEnd);
+assert(schema.includes("confirmationToken:{type:'string'"),'download schema must accept the preview confirmation token');
+assert(schema.includes("confirm:{type:'boolean'"),'download schema must expose explicit confirmation');
+assert(server.includes('function assertNotCursorInstallPath(target)'), 'Cursor/plugin installation destination guard missing');
+assert(server.includes("process.env.CURSOR_PLUGIN_ROOT"),'plugin installation root must be checked');
+const start=server.indexOf("if(name==='cpanel_download')");
+const end=server.indexOf("\n  throw new Error(`Unknown tool:",start);
+const block=server.slice(start,end);
+assert(start>=0&&end>start,'download handler boundaries missing');
+assert(block.includes('requiresConfirmation:true'),'download must return a preview before writing');
+assert(block.includes('localMappedPath'),'preview must show the absolute local destination');
+assert(block.includes('remotePath'),'preview must show the exact remote destination');
+assert(block.includes('confirmationToken'),'preview must return a confirmation token');
+assert(block.includes('a.confirm!==true || a.confirmationToken!==confirmationToken'),'download must require explicit confirmation and the matching token');
+assert(block.indexOf('a.confirm!==true || a.confirmationToken!==confirmationToken')<block.indexOf("withOperationLock(c,'download'"),'confirmation must be checked before entering the write operation');
+assert(block.includes('assertNotCursorInstallPath(localMappedPath)'),'preview must reject Cursor/plugin installation mappings');
+assert(block.includes('assertNotCursorInstallPath(local)'),'every destination file must be guarded immediately before writing');
+assert(block.includes('Refusing to write outside the active workspace'),'each destination must stay inside the active workspace');
+assert(block.includes('downloadRemoteFile(c,rp,size)'),'download must use the authenticated UAPI-first transfer');
+console.log('download-confirmation regression: PASS');
