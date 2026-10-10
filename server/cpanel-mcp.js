@@ -1286,7 +1286,7 @@ const TOOLS=[ {name:'cpanel_get_settings',description:'Get per-connection Protec
  {name:'cpanel_local_upload',description:'Explicit full local-to-remote upload. Protection may require OVERWRITE when existing hosting files will be replaced; new local files are added after confirmation.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'},confirmation:{type:'string'}},required:['name','confirm']}},
  {name:'cpanel_remote_status',description:'Read-only remote-to-local comparison. Detect REMOTE NEW, REMOTE CHANGED, and REMOTE DELETED using a saved remote metadata baseline. Never modifies local files except the remote metadata observation file.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}},
  {name:'cpanel_remote_sync',description:'Synchronize explicitly selected remote changes into the local workspace. REMOTE CHANGED requires OVERWRITE_LOCAL confirmation; REMOTE DELETED requires DELETE_LOCAL confirmation.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'},actions:{type:'array',items:{type:'object',properties:{path:{type:'string'},action:{type:'string',enum:['sync','keep']},confirmation:{type:'string'}},required:['path','action']}}},required:['name','confirm']}},
- {name:'cpanel_download',description:'Explicitly download configured remote folders. This can overwrite local files; use only when the user explicitly requests a download/restore.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}}
+ {name:'cpanel_download',description:'Preview the configured remote-to-local folder mappings first. Requires explicit confirm=true after the user reviews the exact remote and local paths; existing local files may be overwritten.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean',description:'Set true only after the user explicitly approves the displayed remote and local mapping paths.'}},required:['name']}}
 ];
 
 async function callTool(name,a){
@@ -1390,7 +1390,29 @@ async function callTool(name,a){
   }
   if(name==='cpanel_remote_status'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);if(st.protectionMode==='OFF') return await buildRemoteStatus(c);const r=await buildRemoteStatusProtected(c);r.protection=protectionWarning(c);return r;}
   if(name==='cpanel_remote_sync'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);const r=await remoteSync(c,a.actions||[],Boolean(a.confirm));if(st.protectionMode==='OFF') return r;r.protection=protectionWarning(c);if(r.requiresConfirmation)return r;if(st.verifyAfterSync&&protectionEnabled(c,'contentVerification')){r.verification='requested';}return r;}
-  if(name==='cpanel_download'){const c=await getConnection(a.name);return await withOperationLock(c,'download',async()=>{const files=[];const downloaded=[];const errors=[];async function walk(remoteDir,localRoot,remoteRoot){const j=await apiGet(c,'Fileman','list_files',{dir:remoteDir});for(const item of (j.data||[])){const nm=String(item.file||item.name||'');if(!nm)continue;const rp=normalizeRemote(`${remoteDir}/${nm}`);const tail=rp.slice(remoteRoot.length).replace(/^\/+/, '');const rel=path.posix.join(localRoot,tail);if(excluded(rel,c.exclude))continue;if(String(item.type)==='dir'||String(item.type)==='directory'){await walk(rp,localRoot,remoteRoot);continue;}if(!allowedRemote(c,rp))continue;files.push({rp,rel});}}
+  if(name==='cpanel_download'){
+    const c=await getConnection(a.name);
+    const mappings=[];
+    for(const m of (c.mappings||[])){
+      if(m.enabled===false) continue;
+      const remotePath=normalizeRemote(m.remote);
+      const localPath=path.resolve(WORKSPACE,...String(m.local).split('/'));
+      if(remotePath!==normalizeRemote(c.remoteRoot)&&!remotePath.startsWith(normalizeRemote(c.remoteRoot)+'/')) throw new Error('Mapped remote folder is outside the configured remote root: '+remotePath);
+      await assertSafeLocalPath(localPath);
+      mappings.push({remotePath,localMappedPath:localPath,localRelativePath:String(m.local)});
+    }
+    if(!mappings.length) throw new Error('No enabled folder mappings are configured for this connection.');
+    if(a.confirm!==true) return {
+      requiresConfirmation:true,
+      operation:'remote-download',
+      connection:c.name,
+      workspace:WORKSPACE,
+      workspaceSource:WORKSPACE_SOURCE,
+      mappings,
+      warning:'This download can overwrite existing local files at the displayed paths. Nothing has been downloaded yet.',
+      message:'Review every remotePath and localMappedPath. Ask the user for explicit approval before calling cpanel_download again with confirm=true.'
+    };
+    return await withOperationLock(c,'download',async()=>{const files=[];const downloaded=[];const errors=[];async function walk(remoteDir,localRoot,remoteRoot){const j=await apiGet(c,'Fileman','list_files',{dir:remoteDir});for(const item of (j.data||[])){const nm=String(item.file||item.name||'');if(!nm)continue;const rp=normalizeRemote(`${remoteDir}/${nm}`);const tail=rp.slice(remoteRoot.length).replace(/^\/+/, '');const rel=path.posix.join(localRoot,tail);if(excluded(rel,c.exclude))continue;if(String(item.type)==='dir'||String(item.type)==='directory'){await walk(rp,localRoot,remoteRoot);continue;}if(!allowedRemote(c,rp))continue;files.push({rp,rel});}}
     for(const m of (c.mappings||[])){if(m.enabled===false)continue;await assertSafeLocalPath(path.join(WORKSPACE,...m.local.split('/')));await walk(normalizeRemote(m.remote),m.local,normalizeRemote(m.remote));}
     let next=0;const workers=Array.from({length:6},async()=>{while(true){const i=next++;if(i>=files.length)return;const {rp,rel}=files[i];try{const u=new URL(`${c.host}/download`);u.searchParams.set('file',rp);const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});if(!r.ok)throw new Error(`HTTP ${r.status}`);const b=Buffer.from(await r.arrayBuffer());const local=path.join(WORKSPACE,...rel.split('/'));await assertSafeLocalPath(local);await withManifestLock(async()=>{
         await fsp.mkdir(path.dirname(local),{recursive:true});
