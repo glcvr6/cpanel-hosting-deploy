@@ -779,6 +779,10 @@ async function buildRemoteStatus(c, options={}){
     }
   }
   for(const rel of Object.keys(manifest)){
+    // The manifest can retain entries for disabled mappings. Status must only
+    // compare entries belonging to currently enabled mappings; otherwise
+    // remoteFromRel throws and unrelated folders block the entire status run.
+    if(!mappingForLocal(c,rel)) continue;
     if(excluded(rel,c.exclude)) continue;
     const rp=remoteFromRel(c,rel);
     if(!remoteFiles.has(rp)) remoteDeleted.push({path:rel,remote:rp});
@@ -837,6 +841,10 @@ async function buildRemoteStatusProtected(c, options={}){
     }
   }
   for(const rel of Object.keys(manifest)){
+    // The manifest can retain entries for disabled mappings. Status must only
+    // compare entries belonging to currently enabled mappings; otherwise
+    // remoteFromRel throws and unrelated folders block the entire status run.
+    if(!mappingForLocal(c,rel)) continue;
     if(excluded(rel,c.exclude)) continue;
     const rp=remoteFromRel(c,rel);
     if(!remoteFiles.has(rp)) remoteDeleted.push({path:rel,remote:rp});
