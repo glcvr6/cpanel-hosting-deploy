@@ -51,5 +51,6 @@ assert(downloadBlock.includes('localMappedPath:localPath'),'download preview mus
 assert(downloadBlock.includes('remotePath'),'download preview must show exact remote path');
 assert(downloadBlock.includes('requiresConfirmation:true'),'download preview must require confirmation');
 assert(downloadBlock.indexOf('if(a.confirm!==true) return {') < downloadBlock.indexOf("withOperationLock(c,'download'"),'download preview must happen before acquiring download operation');
+assert(s.includes('function assertNotCursorInstallPath(target)'),'download must reject Cursor/plugin installation directories');
 assert(s.includes("const VERSION = '1.13.3';"),'server version must match the current release');
 console.log('Operation safety regression: PASS');
