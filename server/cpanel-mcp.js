@@ -1546,6 +1546,8 @@ async function callToolInContext(name,a){
     const c=await getConnection(a.name);
     const workspace=currentWorkspace();
     const workspaceRoot=path.resolve(workspace);
+    const workspaceContext=WORKSPACE_CONTEXT.getStore();
+    const workspaceSource=workspaceContext&&workspaceContext.source?workspaceContext.source:WORKSPACE_SOURCE;
     const mappings=[];
     for(const m of (c.mappings||[])){
       if(m.enabled===false) continue;
@@ -1576,7 +1578,7 @@ async function callToolInContext(name,a){
         operation:'remote-download',
         connection:c.name,
         workspace:workspaceRoot,
-        workspaceSource:WORKSPACE_SOURCE,
+        workspaceSource,
         mappings,
         confirmationToken,
         warning:'Existing local files at the displayed paths may be overwritten. Nothing has been downloaded yet.',
