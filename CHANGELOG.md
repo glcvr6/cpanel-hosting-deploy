@@ -1,4 +1,4 @@
-## [1.13.3] - 2026-10-10
+## [1.13.4] - 2026-10-10
 
 ### Fixed
 - Fail closed when Cursor does not provide a valid active workspace instead of resolving downloads against the MCP/plugin working directory.
