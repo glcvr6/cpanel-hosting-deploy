@@ -1066,7 +1066,7 @@ async function workspaceState(c){
   const mappedLocalExists = mappingRoots.some(x=>x.exists);
   return {
     workspace: currentWorkspace(),
-    workspaceSource: WORKSPACE_SOURCE,
+    workspaceSource: (WORKSPACE_CONTEXT.getStore()?.source || WORKSPACE_SOURCE),
     state: !hasLocalContent ? 'EMPTY' : (mappings.length ? 'EXISTING_OR_MAPPED' : 'EXISTING_UNMAPPED'),
     hasLocalContent,
     totalFiles,
