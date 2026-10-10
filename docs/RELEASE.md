@@ -12,9 +12,9 @@ The plugin version must remain consistent across:
 - `CHANGELOG.md`;
 - README/release documentation where the version is explicitly referenced.
 
-## Current release: v1.13.4
+## Current release: v1.13.5
 
-v1.13.4 is a workspace-resolution safety patch. It removes the unsafe fallback to the MCP process working directory, prefers Cursor's `WORKSPACE_FOLDER_PATHS`, and fails closed with actionable guidance when the active workspace cannot be identified.
+v1.13.5 is a status-scope reliability patch. Local Status and both protected and unprotected Remote Status paths now compare only files belonging to enabled folder mappings. Stale manifest entries for disabled mappings remain preserved and no longer cause unrelated folders to block status results.
 
 ### Headline changes
 
@@ -29,6 +29,7 @@ v1.13.4 is a workspace-resolution safety patch. It removes the unsafe fallback t
 - Workspace detection prefers Cursor's `WORKSPACE_FOLDER_PATHS` variable.
 - Remote downloads accept a validated explicit project path when active workspace context is missing, and fail closed for invalid paths or Cursor/plugin installation directories.
 - Regression tests cover missing workspace context, invalid paths, and project paths containing spaces.
+- Regression tests verify Local Status and protected/unprotected Remote Status skip disabled-mapping manifest entries.
 
 ### Validation status
 
@@ -40,7 +41,7 @@ The release CI validates:
 - plugin metadata/structure;
 - package version metadata.
 
-PR #20 contains the workspace-resolution fix and its Node.js 20/22 CI validation.
+PR #20 contains the workspace-resolution fix. PR #25 adds enabled-mapping status scope and passed its PR CI; the merge commit also passed CI on `main`.
 
 ## Release checklist
 
