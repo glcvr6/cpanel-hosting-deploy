@@ -39,7 +39,7 @@ try{
   // Cursor's workspace variable wins and paths containing spaces are preserved.
   const valid=run({WORKSPACE_FOLDER_PATHS:JSON.stringify([workspace])});
   assert.strictEqual(valid.status,0,valid.stderr||'server failed with valid workspace');
-  assert.match(valid.stdout,/"serverInfo":\{"name":"cpanel-hosting-deploy","version":"1\.13\.2"\}/);
+  assert.match(valid.stdout,/"serverInfo":\{"name":"cpanel-hosting-deploy","version":"1\.13\.3"\}/);
 
   // Invalid high-priority values do not prevent a valid Cursor workspace fallback.
   const fallback=run({
@@ -47,7 +47,7 @@ try{
     WORKSPACE_FOLDER_PATHS:JSON.stringify([workspace])
   });
   assert.strictEqual(fallback.status,0,fallback.stderr||'server failed with valid workspace fallback');
-  assert.match(fallback.stdout,/"serverInfo":\{"name":"cpanel-hosting-deploy","version":"1\.13\.2"\}/);
+  assert.match(fallback.stdout,/"serverInfo":\{"name":"cpanel-hosting-deploy","version":"1\.13\.3"\}/);
 
   console.log('workspace-resolution: PASS');
 }finally{
