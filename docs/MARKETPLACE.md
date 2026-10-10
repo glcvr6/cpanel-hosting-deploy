@@ -3,7 +3,7 @@
 ## Project identity
 
 **Name:** cPanel Hosting Deploy  
-**Version:** 1.13.4  
+**Version:** 1.13.5  
 **Author:** Gabrijel Baban  
 **Repository:** https://github.com/glcvr6/cpanel-hosting-deploy
 
@@ -17,7 +17,7 @@ The repository front page should communicate these points immediately:
 
 1. What the plugin does: safe Cursor ↔ cPanel deployment and synchronization.
 2. Why it is different: explicit destructive decisions, conflict detection, and state-aware synchronization.
-3. Current release: v1.13.4.
+3. Current release: v1.13.5.
 4. Safety work: atomic state, concurrency locks, remote TOCTOU revalidation, local path/symlink protection, backups, and bounded API operations.
 5. Honest maturity: Protection is implemented and regression-tested, while broader real-world cPanel validation is still being expanded.
 6. How to install/configure: link users to `docs/CONFIGURATION.md`.
@@ -35,7 +35,7 @@ The distributed package must not contain:
 
 ## Release messaging
 
-v1.13.4 is a workspace-resolution safety patch. It prevents remote downloads from using Cursor's or the plugin's installation directory when Cursor does not provide a valid active workspace, and adds regression coverage.
+v1.13.5 updates remote downloads to use authenticated Fileman UAPI reads first, validate byte counts, and diagnose legacy download failures; it retains v1.13.4 workspace-resolution safeguards.
 
 Do not describe the project as fully production-proof across all cPanel configurations. Invite controlled testing on non-production accounts.
 
@@ -45,4 +45,4 @@ Do not describe the project as fully production-proof across all cPanel configur
 
 ## Recommended release title
 
-`v1.13.4 — State, concurrency and download reliability`
+`v1.13.5 — Authenticated remote download reliability`
