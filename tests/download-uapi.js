@@ -1,0 +1,20 @@
+const fs=require('fs');
+const path=require('path');
+const server=fs.readFileSync(path.join(__dirname,'..','server','cpanel-mcp.js'),'utf8');
+function assert(ok,msg){if(!ok)throw new Error(msg);}
+assert(server.includes("async function apiGetFileContent(c,remotePath)"),'authenticated Fileman UAPI reader missing');
+assert(server.includes("'/execute/Fileman/get_file_content'"),'download must use the supported Fileman get_file_content UAPI endpoint');
+assert(server.includes("u.searchParams.set('from_charset','ISO-8859-1')"),'byte-preserving source encoding missing');
+assert(server.includes("u.searchParams.set('to_charset','UTF-8')"),'JSON-safe target encoding missing');
+assert(server.includes("Buffer.from(item.content,'latin1')"),'UAPI content must be converted back to original bytes');
+assert(server.includes('UAPI content size mismatch'),'must reject UAPI content with a byte-count mismatch');
+assert(server.includes("fallback /download returned HTTP ' + r.status"),'fallback failures must report HTTP status and response diagnostics');
+assert(server.includes("async function downloadRemoteFile(c,remotePath,expectedSize)"),'download transport helper missing');
+const start=server.indexOf("if(name==='cpanel_download')");
+const end=server.indexOf("\n  throw new Error(`Unknown tool:",start);
+const block=server.slice(start,end);
+assert(start>=0&&end>start,'download handler boundaries missing');
+assert(block.includes('downloadRemoteFile(c,rp,size)'),'download handler must use the UAPI-first transport');
+assert(block.includes('downloadMethods'),'download report must identify transport used');
+assert(!block.includes('Array.from({length:6}'),'downloads must not use the old six-worker parallel loop');
+console.log('UAPI download regression: PASS');
