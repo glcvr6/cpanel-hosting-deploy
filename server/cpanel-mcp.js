@@ -47,7 +47,7 @@ function resolveWorkspace() {
     for (const candidate of parseWorkspaceCandidates(raw)) {
       const resolved = path.resolve(candidate.replace(/^"|"$/g, ''));
       try {
-        if (fs.statSync(resolved).isDirectory()) return {path: resolved, source};
+        if (fs.statSync(resolved).isDirectory() && !isCursorInstallDirectory(resolved) && !isInsidePluginInstall(resolved)) return {path: resolved, source};
       } catch (_) {}
     }
   }
@@ -60,6 +60,19 @@ function resolveWorkspace() {
 const WORKSPACE_INFO = resolveWorkspace();
 const DEFAULT_WORKSPACE = WORKSPACE_INFO.path;
 const WORKSPACE_CONTEXT = new AsyncLocalStorage();
+
+function isCursorInstallDirectory(resolved) {
+  return fs.existsSync(path.join(resolved, 'Cursor.exe')) ||
+    fs.existsSync(path.join(resolved, 'Cursor.app')) ||
+    (path.basename(resolved).toLowerCase() === 'cursor' && fs.existsSync(path.join(resolved, 'resources', 'app')));
+}
+
+function isInsidePluginInstall(resolved) {
+  const pluginRoot = process.env.CURSOR_PLUGIN_ROOT ? path.resolve(process.env.CURSOR_PLUGIN_ROOT) : null;
+  if (!pluginRoot) return false;
+  const rel = path.relative(pluginRoot, resolved);
+  return rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel));
+}
 
 function currentWorkspace() {
   const scoped = WORKSPACE_CONTEXT.getStore();
@@ -82,16 +95,10 @@ function resolveWorkspaceOverride(raw) {
   catch (_) { throw new Error('Workspace folder does not exist: ' + resolved); }
   if (!stat.isDirectory()) throw new Error('Workspace path is not a directory: ' + resolved);
 
-  const pluginRoot = process.env.CURSOR_PLUGIN_ROOT ? path.resolve(process.env.CURSOR_PLUGIN_ROOT) : null;
-  if (pluginRoot) {
-    const rel = path.relative(pluginRoot, resolved);
-    if (rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel))) {
-      throw new Error('Refusing to use the Cursor plugin installation directory as the workspace.');
-    }
+  if (isInsidePluginInstall(resolved)) {
+    throw new Error('Refusing to use the Cursor plugin installation directory as the workspace.');
   }
-  if (fs.existsSync(path.join(resolved, 'Cursor.exe')) ||
-      fs.existsSync(path.join(resolved, 'Cursor.app')) ||
-      (path.basename(resolved).toLowerCase() === 'cursor' && fs.existsSync(path.join(resolved, 'resources', 'app')))) {
+  if (isCursorInstallDirectory(resolved)) {
     throw new Error('Refusing to use the Cursor application installation directory as the workspace.');
   }
   return resolved;
