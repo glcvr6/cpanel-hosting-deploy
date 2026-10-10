@@ -1,3 +1,10 @@
+## [1.13.5] - 2026-10-10
+
+### Fixed
+- Restrict Local Status and Remote Status comparisons to currently enabled folder mappings, so stale manifest entries from disabled mappings cannot block status checks.
+- Preserve disabled-mapping manifest entries without querying or comparing unrelated remote folders.
+- Add regression tests for enabled-mapping scope in local and protected/unprotected remote status paths.
+
 ## [1.13.4] - 2026-10-10
 
 ### Fixed
