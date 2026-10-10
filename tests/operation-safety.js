@@ -43,5 +43,13 @@ assert(downloadStart>=0&&downloadEnd>downloadStart,'download handler boundaries 
 assert(!downloadBlock.includes("await Promise.all(workers);await saveManifest(manifest)"),'download handler must not perform a stale final manifest save after worker transactions');
 assert(s.includes("st.isSymbolicLink()"),'symbolic links must be rejected in deployment paths');
 assert(s.includes("AbortSignal.timeout(120000)"),'cPanel API calls must have bounded timeouts');
+const downloadSchema=s.slice(s.indexOf("{name:'cpanel_download'"),s.indexOf("];",s.indexOf("{name:'cpanel_download'")));
+assert(downloadSchema.includes("confirm:{type:'boolean'"),'download must accept explicit confirmation');
+assert(downloadSchema.includes('remote and local paths'),'download schema must describe path review');
+assert(downloadBlock.includes('if(a.confirm!==true) return {'),'download must return preview before execution unless explicitly confirmed');
+assert(downloadBlock.includes('localMappedPath:localPath'),'download preview must show exact local mapped path');
+assert(downloadBlock.includes('remotePath'),'download preview must show exact remote path');
+assert(downloadBlock.includes('requiresConfirmation:true'),'download preview must require confirmation');
+assert(downloadBlock.indexOf('if(a.confirm!==true) return {') < downloadBlock.indexOf("withOperationLock(c,'download'"),'download preview must happen before acquiring download operation');
 assert(s.includes("const VERSION = '1.13.3';"),'server version must match the current release');
 console.log('Operation safety regression: PASS');
