@@ -35,7 +35,7 @@ The distributed package must not contain:
 
 ## Release messaging
 
-v1.13.3 is a workspace-resolution safety patch. It prevents remote downloads from using Cursor's or the plugin's installation directory when Cursor does not provide a valid active workspace, and adds regression coverage.
+v1.13.3 is a workspace-resolution safety patch. It prevents remote downloads from using Cursor's or the plugin's installation directory when Cursor does not provide a valid active workspace, requires the user to review exact remote and absolute local mapped paths before download, and adds regression coverage.
 
 Do not describe the project as fully production-proof across all cPanel configurations. Invite controlled testing on non-production accounts.
 
