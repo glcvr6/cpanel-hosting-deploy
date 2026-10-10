@@ -1,7 +1,8 @@
 ## [1.13.4] - 2026-10-10
 
 ### Fixed
-- Fail closed when Cursor does not provide a valid active workspace instead of resolving downloads against the MCP/plugin working directory.
+- Allow `/cpanel-remote-download` to pass the active project root explicitly when Cursor does not expose workspace context.
+- Reject Cursor application/plugin installation directories and fail closed when neither an explicit project path nor a valid workspace environment is available.
 - Prefer Cursor's `WORKSPACE_FOLDER_PATHS` workspace context and add regression tests for missing, invalid, and space-containing workspace paths.
 
 ## [1.13.2] - 2026-10-08
