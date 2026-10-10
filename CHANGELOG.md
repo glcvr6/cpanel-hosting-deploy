@@ -1,5 +1,8 @@
 ## [1.13.3] - 2026-10-10
 
+### Added
+- Require explicit confirmation after showing the exact remote folder and absolute local mapped path before remote downloads; preview warns that local files may be overwritten.
+
 ### Fixed
 - Fail closed when Cursor does not provide a valid active workspace instead of resolving downloads against the MCP/plugin working directory.
 - Prefer Cursor's `WORKSPACE_FOLDER_PATHS` workspace context and add regression tests for missing, invalid, and space-containing workspace paths.
