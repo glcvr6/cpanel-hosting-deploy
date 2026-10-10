@@ -7,8 +7,9 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
+const { AsyncLocalStorage } = require('async_hooks');
 
-const VERSION = '1.13.3';
+const VERSION = '1.13.4';
 
 function parseWorkspaceCandidates(raw) {
   if (!raw) return [];
@@ -33,9 +34,8 @@ function parseWorkspaceCandidates(raw) {
 }
 
 function resolveWorkspace() {
-  // WORKSPACE_FOLDER_PATHS is the Cursor-provided workspace context for local
-  // MCP servers. Prefer it over generic aliases that may be inherited from
-  // shells, launchers, or another editor window.
+  // Prefer Cursor's workspace context when it is available. Plugin MCP servers
+  // may be started globally, before a workspace path is supplied.
   const sources = [
     ['WORKSPACE_FOLDER_PATHS', process.env.WORKSPACE_FOLDER_PATHS],
     ['CURSOR_PROJECT_DIR', process.env.CURSOR_PROJECT_DIR],
@@ -47,25 +47,62 @@ function resolveWorkspace() {
     for (const candidate of parseWorkspaceCandidates(raw)) {
       const resolved = path.resolve(candidate.replace(/^"|"$/g, ''));
       try {
-        if (fs.statSync(resolved).isDirectory()) return {path: resolved, source};
+        if (fs.statSync(resolved).isDirectory() && !isCursorInstallDirectory(resolved) && !isInsidePluginInstall(resolved)) return {path: resolved, source};
       } catch (_) {}
     }
   }
 
-  // A plugin MCP server may run with cwd set to the plugin installation
-  // directory (or even Cursor's application directory). Neither is evidence
-  // of the user's active project. Fail closed instead of treating cwd as the
-  // workspace and risking writes into the wrong folder.
-  throw new Error(
-    'Unable to determine the Cursor workspace. Cursor did not provide a valid ' +
-    'WORKSPACE_FOLDER_PATHS, CURSOR_PROJECT_DIR, CURSOR_WORKSPACE, or VSCODE_CWD. ' +
-    'Refusing to use the MCP working directory because it may be the plugin or Cursor installation folder. ' +
-    'Open the intended project folder in Cursor, run Developer: Reload Window, and retry.'
-  );
+  // Do not use process.cwd(): for a plugin MCP server it can be Cursor's
+  // installation directory rather than the user's project.
+  return {path: null, source: 'unresolved'};
 }
 
 const WORKSPACE_INFO = resolveWorkspace();
-const WORKSPACE = WORKSPACE_INFO.path;
+const DEFAULT_WORKSPACE = WORKSPACE_INFO.path;
+const WORKSPACE_CONTEXT = new AsyncLocalStorage();
+
+function isCursorInstallDirectory(resolved) {
+  return fs.existsSync(path.join(resolved, 'Cursor.exe')) ||
+    fs.existsSync(path.join(resolved, 'Cursor.app')) ||
+    (path.basename(resolved).toLowerCase() === 'cursor' && fs.existsSync(path.join(resolved, 'resources', 'app')));
+}
+
+function isInsidePluginInstall(resolved) {
+  const pluginRoot = process.env.CURSOR_PLUGIN_ROOT ? path.resolve(process.env.CURSOR_PLUGIN_ROOT) : null;
+  if (!pluginRoot) return false;
+  const rel = path.relative(pluginRoot, resolved);
+  return rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel));
+}
+
+function currentWorkspace() {
+  const scoped = WORKSPACE_CONTEXT.getStore();
+  const resolved = scoped && scoped.path ? scoped.path : DEFAULT_WORKSPACE;
+  if (resolved) return resolved;
+  throw new Error(
+    'Unable to determine the Cursor workspace. Pass the absolute path of the open project in the workspace argument. ' +
+    'The plugin will not use its MCP working directory because it may be the Cursor installation folder.'
+  );
+}
+
+function resolveWorkspaceOverride(raw) {
+  const value = String(raw || '').trim();
+  if (!value || !path.isAbsolute(value)) {
+    throw new Error('Workspace must be an absolute path to the open local project folder.');
+  }
+  const resolved = path.resolve(value);
+  let stat;
+  try { stat = fs.statSync(resolved); }
+  catch (_) { throw new Error('Workspace folder does not exist: ' + resolved); }
+  if (!stat.isDirectory()) throw new Error('Workspace path is not a directory: ' + resolved);
+
+  if (isInsidePluginInstall(resolved)) {
+    throw new Error('Refusing to use the Cursor plugin installation directory as the workspace.');
+  }
+  if (isCursorInstallDirectory(resolved)) {
+    throw new Error('Refusing to use the Cursor application installation directory as the workspace.');
+  }
+  return resolved;
+}
 const WORKSPACE_SOURCE = WORKSPACE_INFO.source;
 const APP_DIR = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'cPanel Hosting Deploy');
 const CONNECTIONS_FILE = path.join(APP_DIR, 'connections.json');
@@ -303,13 +340,13 @@ function sha256(file){
   const h=crypto.createHash('sha256'); h.update(fs.readFileSync(file)); return h.digest('hex');
 }
 function relativePosix(full){
-  const rel=path.relative(WORKSPACE,full).replaceAll('\\','/');
+  const rel=path.relative(currentWorkspace(),full).replaceAll('\\','/');
   if (rel.startsWith('../') || rel==='..' || path.isAbsolute(rel)) throw new Error(`Path outside workspace: ${full}`);
   return rel;
 }
 async function assertSafeLocalPath(target){
   const absolute=path.resolve(target);
-  const workspace=path.resolve(WORKSPACE);
+  const workspace=path.resolve(currentWorkspace());
   const rel=path.relative(workspace,absolute);
   if(rel==='..' || rel.startsWith('..'+path.sep) || path.isAbsolute(rel)) throw new Error(`Local path is outside the workspace: ${target}`);
   let current=workspace;
@@ -371,7 +408,7 @@ function allowedRemote(c,p){
   const x=normalizeRemote(p);
   return (c.mappings||[]).some(m=>m.enabled!==false && (x===normalizeRemote(m.remote) || x.startsWith(normalizeRemote(m.remote)+'/')));
 }
-function manifestPath(){return path.join(WORKSPACE,'.hosting','manifest.json');}
+function manifestPath(){return path.join(currentWorkspace(),'.hosting','manifest.json');}
 async function loadManifest(){
   try {
     const x=JSON.parse(await fsp.readFile(manifestPath(),'utf8'));
@@ -383,7 +420,7 @@ async function loadManifest(){
 }
 async function saveManifest(m){ await atomicJsonWrite(manifestPath(),m); }
 async function withManifestLock(fn){
-  return await withFileLock(path.join(WORKSPACE,'.hosting','manifest.lock'),'manifest',fn);
+  return await withFileLock(path.join(currentWorkspace(),'.hosting','manifest.lock'),'manifest',fn);
 }
 async function updateManifestEntry(rel,value){
   return await withManifestLock(async()=>{
@@ -495,7 +532,7 @@ async function downloadOne(c, remotePath, rel, overwrite = true) {
   return sha256(local);
 }
 
-function remoteMetaPath(){return path.join(WORKSPACE,'.hosting','remote-meta.json');}
+function remoteMetaPath(){return path.join(currentWorkspace(),'.hosting','remote-meta.json');}
 async function loadRemoteMeta(){
   try {
     const x=JSON.parse(await fsp.readFile(remoteMetaPath(),'utf8'));
@@ -532,7 +569,7 @@ function relFromRemote(c,rp){
   const tail=x.slice(normalizeRemote(m.remote).length).replace(/^\/+/, '');
   return path.posix.join(m.local,tail);
 }
-function localPathForRel(rel){return path.join(WORKSPACE,...String(rel).split('/'));}
+function localPathForRel(rel){return path.join(currentWorkspace(),...String(rel).split('/'));}
 
 // Remote sync always revalidates the live remote inventory before acting.
 async function atomicJsonWrite(file,value){
@@ -542,15 +579,15 @@ async function atomicJsonWrite(file,value){
   finally{ await fsp.rm(tmp,{force:true}).catch(()=>{}); }
 }
 
-function protectionStatePath(){return path.join(WORKSPACE,'.hosting','protection-state.json');}
+function protectionStatePath(){return path.join(currentWorkspace(),'.hosting','protection-state.json');}
 async function loadProtectionState(){
   try { const x=JSON.parse(await fsp.readFile(protectionStatePath(),'utf8')); return x&&typeof x==='object'?x:{}; }
   catch(e){ if(e.code==='ENOENT') return {}; throw new Error('Protection state is unreadable or corrupted: '+e.message); }
 }
 async function saveProtectionState(x){ await atomicJsonWrite(protectionStatePath(),x);}
-function backupRoot(){return path.join(WORKSPACE,'sync-backup');}
+function backupRoot(){return path.join(currentWorkspace(),'sync-backup');}
 function remoteBackupRoot(){return '.cpanel-sync-backup';}
-function reportRoot(){return path.join(WORKSPACE,'sync-reports');}
+function reportRoot(){return path.join(currentWorkspace(),'sync-reports');}
 function isIgnoredProtectionPath(rel){
   const p=String(rel).replaceAll('\\','/');
   return p.includes('.remote-deleted.backup') ||
@@ -655,10 +692,10 @@ async function withFileLock(lockPath,operation,fn){
 }
 async function withOperationLock(c,operation,fn){
   if(!protectionEnabled(c,'locks')) return await fn();
-  return await withFileLock(path.join(WORKSPACE,'.hosting','operation.lock'),operation,fn);
+  return await withFileLock(path.join(currentWorkspace(),'.hosting','operation.lock'),operation,fn);
 }
 async function withProtectionStateLock(fn){
-  return await withFileLock(path.join(WORKSPACE,'.hosting','protection-state.lock'),'protection-state',fn);
+  return await withFileLock(path.join(currentWorkspace(),'.hosting','protection-state.lock'),'protection-state',fn);
 }
 async function cleanupRetention(dir,limit){
   try{
@@ -914,7 +951,7 @@ async function buildPlanUnlocked(c){
     (async()=>{
       for (const m of (c.mappings||[])) {
         if (m.enabled===false) continue;
-        const root=path.join(WORKSPACE,...m.local.split('/'));
+        const root=path.join(currentWorkspace(),...m.local.split('/'));
         // If the local mapping exists and contains any file missing from the manifest,
         // a remote baseline may be required.
         // We intentionally do not inspect every file here; buildPlan below will decide.
@@ -936,7 +973,7 @@ async function buildPlanUnlocked(c){
     const candidatePaths = [];
     for (const m of (c.mappings || [])) {
       if (m.enabled === false) continue;
-      const root = path.join(WORKSPACE, ...m.local.split('/'));
+      const root = path.join(currentWorkspace(), ...m.local.split('/'));
       try { await assertSafeLocalPath(root); fs.accessSync(root); } catch (_) { continue; }
       async function collect(dir) {
         for (const ent of await fsp.readdir(dir, {withFileTypes:true})) {
@@ -956,7 +993,7 @@ async function buildPlanUnlocked(c){
 
   for(const m of (c.mappings||[])){
     if(m.enabled===false) continue;
-    const root=path.join(WORKSPACE,...m.local.split('/'));
+    const root=path.join(currentWorkspace(),...m.local.split('/'));
     try{await assertSafeLocalPath(root);await fsp.access(root);}catch(_){continue;}
     async function walk(dir){
       for(const ent of await fsp.readdir(dir,{withFileTypes:true})){
@@ -1003,7 +1040,7 @@ async function buildPlanUnlocked(c){
     if (!mapped) continue;
     const remote = remoteFromRel(c, rel);
     if (remoteFilesForDeleted.has(remote)) {
-      out.push({relativePath:rel, localPath:path.join(WORKSPACE,...rel.split('/')), hash:null, status:'DELETED', size:0, remoteInfo:remoteFilesForDeleted.get(remote), mapping:mappingForLocal(c, rel)});
+      out.push({relativePath:rel, localPath:path.join(currentWorkspace(),...rel.split('/')), hash:null, status:'DELETED', size:0, remoteInfo:remoteFilesForDeleted.get(remote), mapping:mappingForLocal(c, rel)});
     }
   }
   if(manifestChanged) await saveManifest(manifest);
@@ -1022,21 +1059,21 @@ async function workspaceState(c){
   let totalFiles = 0;
   let totalDirs = 0;
   let hostingDirCount = 0;
-  for (const ent of await fsp.readdir(WORKSPACE, {withFileTypes:true})) {
+  for (const ent of await fsp.readdir(currentWorkspace(), {withFileTypes:true})) {
     if (ent.name === '.hosting') continue;
     if (excluded(ent.name, c.exclude)) continue;
     entries.push(ent.name);
     if (ent.isDirectory()) totalDirs++; else totalFiles++;
   }
   const mappings = (c.mappings || []).filter(m=>m.enabled!==false);
-  const mappingRoots = mappings.map(m=>({local:m.local, remote:m.remote, exists:fs.existsSync(path.join(WORKSPACE,...m.local.split('/')))}));
+  const mappingRoots = mappings.map(m=>({local:m.local, remote:m.remote, exists:fs.existsSync(path.join(currentWorkspace(),...m.local.split('/')))}));
   const manifest = await loadManifest();
   const manifestEntries = Object.keys(manifest).length;
   const hasLocalContent = entries.length > 0;
   const mappedLocalExists = mappingRoots.some(x=>x.exists);
   return {
-    workspace: WORKSPACE,
-    workspaceSource: WORKSPACE_SOURCE,
+    workspace: currentWorkspace(),
+    workspaceSource: (WORKSPACE_CONTEXT.getStore()?.source || WORKSPACE_SOURCE),
     state: !hasLocalContent ? 'EMPTY' : (mappings.length ? 'EXISTING_OR_MAPPED' : 'EXISTING_UNMAPPED'),
     hasLocalContent,
     totalFiles,
@@ -1067,7 +1104,7 @@ async function initializeWorkspaceFromHost(c, mappings, confirm){
   // This onboarding path is intentionally strict: it may populate only a new
   // or genuinely empty local folder. It never overwrites an existing project.
   for(const m of normalized){
-    const localRoot=path.join(WORKSPACE,...m.local.split('/'));
+    const localRoot=path.join(currentWorkspace(),...m.local.split('/'));
     try{
       const st=await fsp.stat(localRoot);
       if(!st.isDirectory()) throw new Error(`Local target exists and is not a folder: ${m.local}`);
@@ -1098,7 +1135,7 @@ async function initializeWorkspaceFromHost(c, mappings, confirm){
         await walk(rp,localRoot,remoteRoot); continue;
       }
       if(!allowedRemote(c,rp)) continue;
-      const local=path.join(WORKSPACE,...rel.split('/'));
+      const local=path.join(currentWorkspace(),...rel.split('/'));
       await assertSafeLocalPath(local);
       try { await fsp.access(local); throw new Error(`Local target became non-empty during initialization: ${rel}`); }
       catch(e) { if(e.code!=='ENOENT') throw e; }
@@ -1286,10 +1323,20 @@ const TOOLS=[ {name:'cpanel_get_settings',description:'Get per-connection Protec
  {name:'cpanel_local_upload',description:'Explicit full local-to-remote upload. Protection may require OVERWRITE when existing hosting files will be replaced; new local files are added after confirmation.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'},confirmation:{type:'string'}},required:['name','confirm']}},
  {name:'cpanel_remote_status',description:'Read-only remote-to-local comparison. Detect REMOTE NEW, REMOTE CHANGED, and REMOTE DELETED using a saved remote metadata baseline. Never modifies local files except the remote metadata observation file.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}},
  {name:'cpanel_remote_sync',description:'Synchronize explicitly selected remote changes into the local workspace. REMOTE CHANGED requires OVERWRITE_LOCAL confirmation; REMOTE DELETED requires DELETE_LOCAL confirmation.',inputSchema:{type:'object',properties:{name:{type:'string'},confirm:{type:'boolean'},actions:{type:'array',items:{type:'object',properties:{path:{type:'string'},action:{type:'string',enum:['sync','keep']},confirmation:{type:'string'}},required:['path','action']}}},required:['name','confirm']}},
- {name:'cpanel_download',description:'Explicitly download configured remote folders. This can overwrite local files; use only when the user explicitly requests a download/restore.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name']}}
+ {name:'cpanel_download',description:'Explicitly download configured remote folders. Pass workspace as the absolute path of the active local project when Cursor workspace context is unavailable. This can overwrite local files; use only when the user explicitly requests a download/restore.',inputSchema:{type:'object',properties:{name:{type:'string'},workspace:{type:'string',description:'Absolute path to the currently open local project folder; required if Cursor workspace context is unavailable.'}},required:['name']}}
 ];
 
 async function callTool(name,a){
+  const args = a || {};
+  const explicitWorkspace = args.workspace ? resolveWorkspaceOverride(args.workspace) : null;
+  const workspace = explicitWorkspace || DEFAULT_WORKSPACE;
+  return await WORKSPACE_CONTEXT.run(
+    {path: workspace, source: explicitWorkspace ? 'tool argument' : WORKSPACE_SOURCE},
+    () => callToolInContext(name, args)
+  );
+}
+
+async function callToolInContext(name,a){
   await syncDefaultFromEnv();
   if(name==='cpanel_help'){return {version:VERSION,commands:[
     {command:'/cpanel',description:'Open the main cPanel Hosting Deploy command menu.'},
@@ -1363,7 +1410,7 @@ async function callTool(name,a){
     const c=await getConnection(a.name);
     return await withOperationLock(c,'local-upload',async()=>{
     const files=[];
-    for(const m of (c.mappings||[])){ if(m.enabled===false) continue; const root=path.join(WORKSPACE,...m.local.split('/')); try{await assertSafeLocalPath(root);await fsp.access(root);}catch(_){continue;}
+    for(const m of (c.mappings||[])){ if(m.enabled===false) continue; const root=path.join(currentWorkspace(),...m.local.split('/')); try{await assertSafeLocalPath(root);await fsp.access(root);}catch(_){continue;}
       async function walk(dir){ for(const ent of await fsp.readdir(dir,{withFileTypes:true})){ const full=path.join(dir,ent.name); const rel=relativePosix(full); if(ent.isSymbolicLink()) throw new Error(`Symbolic links are not allowed in deployment paths: ${rel}`); if(excluded(rel,c.exclude)) continue; if(ent.isDirectory()){await walk(full);continue;} const remote=remoteFromRel(c,rel); files.push({path:rel,remote,size:ent.size}); }}
       await walk(root); }
     if(!a.confirm) return {requiresConfirmation:true,connection:c.name,count:files.length,files,message:'FULL LOCAL → HOSTING upload. Existing remote files with the same paths will be overwritten; new local files will be added; remote-only files will not be deleted. No changes were made.'};
@@ -1383,7 +1430,7 @@ async function callTool(name,a){
         const remoteFiles=await listRemoteFiles(c);
         if(remoteFiles.has(f.remote)) await retryOperation(()=>remoteBackup(c,f.remote,f.path,'remote-overwritten'),transferAttempts(c));
       }
-      await ensureRemoteDir(c,path.posix.dirname(f.remote));await retryOperation(()=>apiUpload(c,path.posix.dirname(f.remote),path.join(WORKSPACE,...f.path.split('/'))),transferAttempts(c));await updateManifestEntry(f.path,sha256(path.join(WORKSPACE,...f.path.split('/'))));uploaded.push(f.path);}catch(e){failed.push({path:f.path,error:e.message});}}
+      await ensureRemoteDir(c,path.posix.dirname(f.remote));await retryOperation(()=>apiUpload(c,path.posix.dirname(f.remote),path.join(currentWorkspace(),...f.path.split('/'))),transferAttempts(c));await updateManifestEntry(f.path,sha256(path.join(currentWorkspace(),...f.path.split('/'))));uploaded.push(f.path);}catch(e){failed.push({path:f.path,error:e.message});}}
     const result={requiresConfirmation:false,connection:c.name,uploaded,failed,message:`Full upload completed: ${uploaded.length} uploaded, ${failed.length} failed.`};
     return result;
     });
@@ -1391,8 +1438,8 @@ async function callTool(name,a){
   if(name==='cpanel_remote_status'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);if(st.protectionMode==='OFF') return await buildRemoteStatus(c);const r=await buildRemoteStatusProtected(c);r.protection=protectionWarning(c);return r;}
   if(name==='cpanel_remote_sync'){const c=await getConnection(a.name);const st=normalizeSettings(c.settings);const r=await remoteSync(c,a.actions||[],Boolean(a.confirm));if(st.protectionMode==='OFF') return r;r.protection=protectionWarning(c);if(r.requiresConfirmation)return r;if(st.verifyAfterSync&&protectionEnabled(c,'contentVerification')){r.verification='requested';}return r;}
   if(name==='cpanel_download'){const c=await getConnection(a.name);return await withOperationLock(c,'download',async()=>{const files=[];const downloaded=[];const errors=[];async function walk(remoteDir,localRoot,remoteRoot){const j=await apiGet(c,'Fileman','list_files',{dir:remoteDir});for(const item of (j.data||[])){const nm=String(item.file||item.name||'');if(!nm)continue;const rp=normalizeRemote(`${remoteDir}/${nm}`);const tail=rp.slice(remoteRoot.length).replace(/^\/+/, '');const rel=path.posix.join(localRoot,tail);if(excluded(rel,c.exclude))continue;if(String(item.type)==='dir'||String(item.type)==='directory'){await walk(rp,localRoot,remoteRoot);continue;}if(!allowedRemote(c,rp))continue;files.push({rp,rel});}}
-    for(const m of (c.mappings||[])){if(m.enabled===false)continue;await assertSafeLocalPath(path.join(WORKSPACE,...m.local.split('/')));await walk(normalizeRemote(m.remote),m.local,normalizeRemote(m.remote));}
-    let next=0;const workers=Array.from({length:6},async()=>{while(true){const i=next++;if(i>=files.length)return;const {rp,rel}=files[i];try{const u=new URL(`${c.host}/download`);u.searchParams.set('file',rp);const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});if(!r.ok)throw new Error(`HTTP ${r.status}`);const b=Buffer.from(await r.arrayBuffer());const local=path.join(WORKSPACE,...rel.split('/'));await assertSafeLocalPath(local);await withManifestLock(async()=>{
+    for(const m of (c.mappings||[])){if(m.enabled===false)continue;await assertSafeLocalPath(path.join(currentWorkspace(),...m.local.split('/')));await walk(normalizeRemote(m.remote),m.local,normalizeRemote(m.remote));}
+    let next=0;const workers=Array.from({length:6},async()=>{while(true){const i=next++;if(i>=files.length)return;const {rp,rel}=files[i];try{const u=new URL(`${c.host}/download`);u.searchParams.set('file',rp);const r=await fetch(u,{headers:authHeaders(c),signal:AbortSignal.timeout(120000)});if(!r.ok)throw new Error(`HTTP ${r.status}`);const b=Buffer.from(await r.arrayBuffer());const local=path.join(currentWorkspace(),...rel.split('/'));await assertSafeLocalPath(local);await withManifestLock(async()=>{
         await fsp.mkdir(path.dirname(local),{recursive:true});
         await fsp.writeFile(local,b);
         const manifest=await loadManifest();
