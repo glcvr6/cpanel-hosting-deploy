@@ -13,7 +13,7 @@
 
 cPanel Hosting Deploy connects a Cursor workspace to one or more cPanel accounts, tracks file state with SHA-256 baselines, detects local and remote changes, identifies conflicts, and keeps destructive actions explicit.
 
- > **v1.13.3:** Fixes workspace detection for remote downloads. The plugin now prefers Cursor's workspace path and refuses to write into Cursor's installation directory when the active project cannot be identified.
+> **v1.13.3:** Fixes workspace detection for remote downloads. The plugin now prefers Cursor's workspace path and refuses to write into Cursor's installation directory when the active project cannot be identified.
 
 ---
 
