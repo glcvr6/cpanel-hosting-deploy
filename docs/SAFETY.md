@@ -20,9 +20,14 @@ Depending on the workflow and Protection settings, destructive actions include:
 - overwrite local;
 - overwrite remote;
 - force-local / force-remote conflict resolution;
-- restore operations that overwrite an existing target.
+- restore operations that overwrite an existing target;
+- explicit remote download into mapped local paths (may overwrite existing local files).
 
 These actions should be tested only with recoverable data.
+
+## Download destination confirmation
+
+`/cpanel-remote-download` / `cpanel_download` must show the exact remote and absolute local destinations before writing. Proceeding requires `confirm: true` and the matching `confirmationToken` from that preview. Tokens are invalidated when the workspace or enabled mappings change. Downloads refuse Cursor/plugin installation directories, workspace escapes, and unsafe local symlink paths. See `commands/cpanel-remote-download.md`.
 
 ## Backups
 
@@ -36,6 +41,14 @@ Corrupt or unreadable persisted state fails closed rather than silently resettin
 
 A crash can still leave an operation at a recoverable intermediate point—for example, a remote upload may complete before its manifest update. The next planning/status pass is expected to reconcile the observable state. The implementation is designed to avoid silently treating an incomplete transaction as fully successful.
 
+## Transport and credential constraints
+
+- cPanel hosts must use HTTPS; cleartext HTTP hosts are rejected before the API token is sent.
+- Explicit downloads prefer authenticated Fileman UAPI content reads with size validation, then fall back to legacy `/download` while preserving diagnostic context.
+- v1 token encryption uses Windows DPAPI; live credential add/reveal paths are Windows-only.
+
 ## Testing rule
 
 Use a dedicated non-production cPanel account for Protection testing. Never use customer production data as a test fixture.
+
+For setup and runtime pitfalls, see `docs/TROUBLESHOOTING.md`.

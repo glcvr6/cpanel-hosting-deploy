@@ -236,6 +236,7 @@ For the full donation details, see [`SUPPORT.md`](SUPPORT.md).
 - [`docs/COMMANDS.md`](docs/COMMANDS.md) — command/MCP overview
 - [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — connections and mappings
 - [`docs/SAFETY.md`](docs/SAFETY.md) — safety model
+- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — setup and runtime pitfalls
 - [`docs/TEST-MATRIX.md`](docs/TEST-MATRIX.md) — validation and test status
 - [`docs/PROTECTION-TESTING.md`](docs/PROTECTION-TESTING.md) — Protection testing roadmap
 - [`docs/RELEASE.md`](docs/RELEASE.md) — release process

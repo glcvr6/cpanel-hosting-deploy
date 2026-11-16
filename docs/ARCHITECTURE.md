@@ -22,6 +22,19 @@ Cursor
           `-- Protection policy layer
 ```
 
+## Workspace resolution
+
+The MCP server resolves the active project root at startup and for scoped operations. Preferred sources, in order:
+
+1. `WORKSPACE_FOLDER_PATHS` (Cursor workspace context; supports multi-root JSON/list forms)
+2. `CURSOR_PROJECT_DIR`
+3. `CURSOR_WORKSPACE`
+4. `VSCODE_CWD`
+
+Unresolved `${workspaceFolder}` placeholders are ignored. Cursor application and plugin installation directories are rejected. The server does **not** fall back to `process.cwd()`, because a globally started plugin MCP process may be running inside Cursor's install tree.
+
+`cpanel_download` can accept an absolute `workspace` override when Cursor does not expose workspace context. That override is validated the same way: absolute path, existing directory, inside the intended project, never a Cursor/plugin install path.
+
 ## State model
 
 The plugin maintains a local manifest under `.hosting/manifest.json`. The manifest provides the baseline used to classify tracked files as `UNCHANGED`, `CHANGED`, `NEW`, or `DELETED`.
@@ -33,6 +46,8 @@ Remote status additionally distinguishes:
 - `REMOTE DELETED` — tracked local file exists but the remote file is gone;
 - `REMOTE UNTRACKED` — remote file exists outside the tracked local baseline;
 - `CONFLICT` — local and remote both diverged from the shared baseline.
+
+Local and remote status compare only paths that belong to **currently enabled** folder mappings. Manifest entries for disabled mappings are retained but skipped so unrelated folders cannot block status.
 
 ## Persisted state and concurrency
 
@@ -67,6 +82,17 @@ The Protection layer is intentionally designed so the core deployment engine rem
 ## Remote operations
 
 The plugin uses cPanel API/Fileman capabilities available to the configured account. Remote deletion uses cPanel's trash operation rather than an irreversible filesystem deletion where the API supports that path.
+
+### Explicit remote download
+
+`cpanel_download` is a two-step operation:
+
+1. **Preview** — lists every enabled mapping as `remotePath` → absolute `localMappedPath`, reports the resolved workspace source, and returns a `confirmationToken` hashed from connection name + workspace + mapping destinations.
+2. **Confirm** — requires `confirm: true` and the matching token. Changing the workspace or mappings invalidates the token.
+
+File bytes are fetched with authenticated Fileman `get_file_content` UAPI first (byte-preserving Latin-1 round-trip plus size validation). If that path fails, the server tries the legacy `/download` route and surfaces both errors when the fallback also fails. Writes stay inside the active workspace, reject symlink escapes, and refuse Cursor/plugin installation destinations. Manifest updates for successful files run under the manifest lock; failed files are reported without pretending the whole download succeeded.
+
+cPanel API requests use a 120-second timeout.
 
 ## Design principle
 
